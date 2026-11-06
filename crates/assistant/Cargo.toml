@@ -1,0 +1,20 @@
+[package]
+name = "wordcraft-assistant"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WordCraft writing assistant: editing, research and consistency suggestions from an external AI workflow (Flowise), applied as tracked changes and comments"
+
+[lints]
+workspace = true
+
+[dependencies]
+wordcraft-engine = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+# The HTTP client never builds for the web (WASM) version; there the assistant has no backend.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = "3"
