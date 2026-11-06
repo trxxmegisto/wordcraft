@@ -2,7 +2,7 @@ use serde_json::json;
 use wordcraft_engine::Session;
 use wordcraft_engine::doc::Document;
 
-use crate::{AssistantError, DEFAULT_AUTHOR, Kind, MAX_SUGGESTIONS, Suggestion, Task, apply, parse_suggestions, question};
+use crate::{AssistantError, DEFAULT_AUTHOR, Kind, MAX_SUGGESTIONS, Suggestion, Task, apply, apply_as, parse_suggestions, question};
 
 fn body_text(s: &mut Session) -> String {
     let v = s.run("document.text", &json!({})).unwrap();
@@ -80,7 +80,7 @@ fn the_question_carries_the_task_the_format_and_the_text() {
         assert!(q.contains("Der Hund lief schnell."), "{task:?}");
         assert!(q.contains("JSON-Array"), "{task:?}");
     }
-    assert!(question(Task::Recherche, "x").contains("ausschließlich \"comment\""));
+    assert!(question(Task::Konsistenz, "x").contains("ausschließlich \"comment\""));
 }
 
 #[test]
@@ -239,4 +239,38 @@ fn a_misquoted_replacement_is_left_alone() {
     let report = apply(&mut s, &[replace("Dass es regnet", "es schneit")], DEFAULT_AUTHOR);
     assert_eq!(report.not_found, vec!["Dass es regnet".to_string()], "only comments get the looser match");
     assert_eq!(body_text(&mut s), "Er sagte, dass es regnet.");
+}
+
+#[test]
+fn a_research_correction_replaces_the_fact_and_says_why() {
+    let mut s = Session::new(Document::from_text("Als am 9. November 1990 die Mauer fiel, saß sie da."));
+    let fix = Suggestion {
+        kind: Kind::Replace,
+        original: "9. November 1990".into(),
+        replacement: "9. November 1989".into(),
+        reason: "Falsch: Die Berliner Mauer fiel am 9. November 1989.".into(),
+    };
+    let report = apply_as(&mut s, &[fix], Task::Recherche.author(), Task::Recherche.explains_replacements());
+    assert_eq!(report.applied, 1, "{report:?}");
+    assert_eq!(body_text(&mut s), "Als am 9. November 1989 die Mauer fiel, saß sie da.");
+    let authors: Vec<&str> = s.doc.comments.values().map(|c| c.author.as_str()).collect();
+    assert_eq!(authors, ["Recherche (KI)"], "the reason is a comment on the new text");
+    // Rejecting the change brings the original fact back.
+    s.run("review.rejectAll", &json!({})).unwrap();
+    assert_eq!(body_text(&mut s), "Als am 9. November 1990 die Mauer fiel, saß sie da.");
+}
+
+#[test]
+fn lektorat_replacements_stay_without_a_comment() {
+    let mut s = Session::new(Document::from_text("Der Hund lief schnell."));
+    apply_as(&mut s, &[replace("lief schnell", "rannte")], Task::Lektorat.author(), Task::Lektorat.explains_replacements());
+    assert!(s.doc.comments.is_empty());
+}
+
+#[test]
+fn research_notes_need_a_verdict() {
+    assert!(Task::Recherche.has_verdict("Falsch: 1989."));
+    assert!(Task::Recherche.has_verdict("  Unklar: Ortschronik."));
+    assert!(!Task::Recherche.has_verdict("Das sollte überprüft werden."));
+    assert!(Task::Lektorat.has_verdict("kürzer"), "other tasks take any reason");
 }

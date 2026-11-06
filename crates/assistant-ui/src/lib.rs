@@ -7,7 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use egui::{RichText, Ui};
-use wordcraft_assistant::{AssistantError, Kind, Suggestion, Task, apply};
+use wordcraft_assistant::{AssistantError, Kind, Suggestion, Task, apply_as};
 use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_egui::panes::PaneExtension;
 
@@ -168,8 +168,15 @@ impl AssistantPane {
                 self.note("Keine Anmerkungen.");
             }
             Ok(list) => {
-                self.note(format!("{} Vorschläge.", list.len()));
-                self.rows = list.into_iter().map(|suggestion| Row { suggestion, chosen: true }).collect();
+                // Research notes without a verdict start unticked: they are rarely worth a comment.
+                let task = self.rows_task;
+                self.rows = list.into_iter().map(|suggestion| Row { chosen: task.has_verdict(&suggestion.reason), suggestion }).collect();
+                let unticked = self.rows.iter().filter(|r| !r.chosen).count();
+                self.note(match unticked {
+                    0 => format!("{} Vorschläge.", self.rows.len()),
+                    1 => format!("{} Vorschläge; einer ohne Urteil ist nicht ausgewählt.", self.rows.len()),
+                    n => format!("{} Vorschläge; {n} ohne Urteil sind nicht ausgewählt.", self.rows.len()),
+                });
             }
             Err(e @ AssistantError::Unreachable(_)) => self.problem(format!("{e} Läuft Flowise unter der eingetragenen Adresse?")),
             Err(e @ AssistantError::NotConfigured(_)) => self.problem(format!("{e} Siehe „Verbindung“ unten.")),
@@ -184,7 +191,7 @@ impl AssistantPane {
             self.problem("Kein Vorschlag ausgewählt.");
             return;
         }
-        let report = apply(&mut app.session, &chosen, self.rows_task.author());
+        let report = apply_as(&mut app.session, &chosen, self.rows_task.author(), self.rows_task.explains_replacements());
         // Applied rows leave the list; the ones that weren't found or failed stay, unticked, so
         // the writer sees which.
         let kept = |r: &Row| report.not_found.contains(&r.suggestion.original) || report.failed.iter().any(|(o, _)| *o == r.suggestion.original);

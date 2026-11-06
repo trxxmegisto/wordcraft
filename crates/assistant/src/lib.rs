@@ -16,8 +16,8 @@ pub mod flowise;
 mod prompt;
 mod suggestion;
 
-pub use apply::{ApplyReport, DEFAULT_AUTHOR, apply};
-pub use prompt::{Task, question};
+pub use apply::{ApplyReport, DEFAULT_AUTHOR, apply, apply_as};
+pub use prompt::{Task, VERDICTS, question};
 pub use suggestion::{Kind, MAX_FIELD_CHARS, MAX_SUGGESTIONS, Suggestion, parse_suggestions};
 
 /// Errors from the assistant. Their messages are German: they are shown to the writer as they are.

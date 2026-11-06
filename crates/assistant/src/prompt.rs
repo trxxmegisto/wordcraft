@@ -46,6 +46,18 @@ impl Task {
         }
     }
 
+    /// Whether the task's replacements carry their reason as a comment too: a research
+    /// correction changes a fact, and the writer should see why.
+    pub fn explains_replacements(self) -> bool {
+        self == Task::Recherche
+    }
+
+    /// Whether `reason` is usable for this task: research notes must open with a verdict
+    /// ([`VERDICTS`]); the other tasks take any reason.
+    pub fn has_verdict(self, reason: &str) -> bool {
+        self != Task::Recherche || VERDICTS.iter().any(|v| reason.trim_start().starts_with(v))
+    }
+
     fn instructions(self) -> &'static str {
         match self {
             Task::Lektorat => {
@@ -62,14 +74,18 @@ impl Task {
                  nichts, was allgemein bekannt und richtig ist, und keine Stelle nur deshalb, weil sie ein \
                  Datum oder einen Ort enthält. Stimmt eine Angabe nach deinem Wissen, melde sie nicht, auch \
                  nicht, um die Formulierung zu verbessern; Stil ist Sache des Lektorats. Lieber wenige gute Hinweise als viele allgemeine; höchstens zehn.\n\
-                 Jeder Kommentar beginnt mit einem Urteil: \"Falsch:\", \"Zweifelhaft:\" oder \"Unklar:\". \
-                 Bei \"Falsch:\" nenne den richtigen Sachverhalt, zum Beispiel \"Falsch: Die Berliner Mauer \
-                 fiel am 9. November 1989.\" Bei \"Zweifelhaft:\" sage, was nach deinem Wissen stimmt und \
-                 warum du zweifelst. Bei \"Unklar:\" sage konkret, was zu klären ist und wo (etwa \
+                 Jede Begründung (\"reason\") beginnt mit einem Urteil: \"Falsch:\", \"Zweifelhaft:\" oder \
+                 \"Unklar:\". Bei \"Falsch:\" nenne den richtigen Sachverhalt, zum Beispiel \"Falsch: Die \
+                 Berliner Mauer fiel am 9. November 1989.\" Bei \"Zweifelhaft:\" sage, was nach deinem Wissen \
+                 stimmt und warum du zweifelst. Bei \"Unklar:\" sage konkret, was zu klären ist und wo (etwa \
                  Ortschronik, Museum, Fachlexikon). Schreibe nie nur \"sollte überprüft werden\".\n\
-                 Behauptet eine Figur etwas Falsches, kann das gewollt sein: Markiere es trotzdem und \
-                 schreibe dazu \"(Figurenrede, eventuell beabsichtigt)\".\n\
-                 Nenne Quellen nur, wenn du dir sicher bist. Verwende ausschließlich \"comment\"."
+                 Ist eine Angabe sicher falsch, verwende \"replace\": \"original\" ist die kürzeste Stelle mit \
+                 dem Fehler (etwa \"9. November 1990\"), \"replacement\" dieselbe Stelle mit der richtigen \
+                 Angabe (\"9. November 1989\"); ändere nur den Fehler, nicht den Wortlaut drumherum. In allen \
+                 anderen Fällen (\"Zweifelhaft:\", \"Unklar:\") verwende \"comment\".\n\
+                 Behauptet eine Figur etwas Falsches, kann das gewollt sein: Verwende dann \"comment\", nie \
+                 \"replace\", und schreibe dazu \"(Figurenrede, eventuell beabsichtigt)\".\n\
+                 Nenne Quellen nur, wenn du dir sicher bist."
             }
             Task::Konsistenz => {
                 "Du prüfst einen Romantext auf innere Widersprüche: Namen, Schreibweisen, Alter, Aussehen, \
@@ -79,6 +95,9 @@ impl Task {
         }
     }
 }
+
+/// The verdicts a research note opens with.
+pub const VERDICTS: [&str; 3] = ["Falsch:", "Zweifelhaft:", "Unklar:"];
 
 const FORMAT: &str = "Antworte ausschließlich mit einem JSON-Array, ohne weiteren Text. Jedes Element ist ein Objekt:\n\
 {\"kind\": \"replace\" oder \"comment\", \"original\": die betroffene Textstelle, zeichengenau und wörtlich aus dem Text kopiert, so kurz wie möglich, aber eindeutig, \"replacement\": der neue Text (nur bei replace), \"reason\": eine kurze Begründung auf Deutsch}.\n\

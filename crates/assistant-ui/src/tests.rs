@@ -141,7 +141,7 @@ fn suggestions_sign_with_the_task_they_came_from() {
     let mut pane = AssistantPane::new();
     pane.rows_task = Task::Recherche;
     pane.task = Task::Konsistenz; // switching the tab afterwards doesn't change who wrote them
-    pane.receive(Ok(vec![comment("Hund", "Rasse prüfen")]));
+    pane.receive(Ok(vec![comment("Hund", "Unklar: Rasse prüfen")]));
     pane.apply_chosen(&mut app);
     let authors: Vec<&str> = app.session.doc.comments.values().map(|c| c.author.as_str()).collect();
     assert_eq!(authors, ["Recherche (KI)"]);
@@ -185,4 +185,34 @@ fn broken_or_huge_settings_files_fall_back_to_the_defaults() {
         std::fs::write(&path, junk).unwrap();
         assert_eq!(crate::backend::load(&path), Default::default(), "{}", junk.len());
     }
+}
+
+#[test]
+fn research_hints_without_a_verdict_start_unticked() {
+    let mut pane = AssistantPane::new();
+    pane.rows_task = Task::Recherche;
+    pane.receive(Ok(vec![comment("Hund", "Falsch: Katze."), comment("Wiese", "Das sollte überprüft werden.")]));
+    let ticked: Vec<bool> = pane.rows.iter().map(|r| r.chosen).collect();
+    assert_eq!(ticked, [true, false]);
+    assert_eq!(pane.message.as_deref(), Some("2 Vorschläge; einer ohne Urteil ist nicht ausgewählt."));
+    pane.rows_task = Task::Lektorat;
+    pane.receive(Ok(vec![comment("Wiese", "Füllwort")]));
+    assert!(pane.rows[0].chosen, "Lektorat notes need no verdict");
+}
+
+#[test]
+fn an_accepted_research_correction_replaces_the_wrong_fact() {
+    let mut app = app("Als am 9. November 1990 die Mauer fiel.");
+    let mut pane = AssistantPane::new();
+    pane.rows_task = Task::Recherche;
+    pane.receive(Ok(vec![Suggestion {
+        kind: Kind::Replace,
+        original: "9. November 1990".into(),
+        replacement: "9. November 1989".into(),
+        reason: "Falsch: Die Mauer fiel 1989.".into(),
+    }]));
+    pane.apply_chosen(&mut app);
+    assert_eq!(body_text(&mut app), "Als am 9. November 1989 die Mauer fiel.");
+    let authors: Vec<&str> = app.session.doc.comments.values().map(|c| c.author.as_str()).collect();
+    assert_eq!(authors, ["Recherche (KI)"]);
 }

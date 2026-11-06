@@ -30,6 +30,12 @@ pub struct ApplyReport {
 /// revision the writer accepts or rejects; the setting and the session's author are restored
 /// afterwards. Each passage is located by its first occurrence in the document.
 pub fn apply(session: &mut Session, suggestions: &[Suggestion], author: &str) -> ApplyReport {
+    apply_as(session, suggestions, author, false)
+}
+
+/// [`apply`], and with `explain` each replacement also gets its reason as a comment on the new
+/// text (research corrections: the writer sees why a fact was changed).
+pub fn apply_as(session: &mut Session, suggestions: &[Suggestion], author: &str, explain: bool) -> ApplyReport {
     let mut report = ApplyReport::default();
     if suggestions.is_empty() {
         return report;
@@ -51,7 +57,12 @@ pub fn apply(session: &mut Session, suggestions: &[Suggestion], author: &str) ->
             Kind::Comment => session.run("review.newComment", &json!({"text": s.reason})),
         };
         match result {
-            Ok(_) => report.applied += 1,
+            Ok(_) => {
+                report.applied += 1;
+                if explain && s.kind == Kind::Replace && !s.reason.trim().is_empty() && !s.replacement.is_empty() {
+                    comment_inserted(session, &s.replacement, &s.reason);
+                }
+            }
             Err(e) => report.failed.push((s.original.clone(), e.to_string())),
         }
     }
@@ -98,4 +109,22 @@ fn near_quotes(original: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// Put `reason` as a comment on `inserted`, the text just typed before the caret. A comment that
+/// can't be placed is only logged: the replacement itself is in.
+fn comment_inserted(session: &mut Session, inserted: &str, reason: &str) {
+    let placed = (|| -> Option<()> {
+        let sel = session.run("document.selection", &json!({})).ok()?;
+        let focus = sel.get("focus")?.clone();
+        let off = focus.get("off")?.as_u64().and_then(|o| usize::try_from(o).ok())?.checked_sub(inserted.len())?;
+        let mut anchor = focus.clone();
+        *anchor.get_mut("off")? = json!(off);
+        session.run("select.range", &json!({"anchor": anchor, "focus": focus})).ok()?;
+        session.run("review.newComment", &json!({"text": reason})).ok()?;
+        Some(())
+    })();
+    if placed.is_none() {
+        log::warn!("assistant: couldn't put the reason on the replacement as a comment");
+    }
 }

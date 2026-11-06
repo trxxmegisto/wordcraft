@@ -36,7 +36,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     eprintln!("{} suggestions in {:.0?}\n", suggestions.len(), started.elapsed());
     for s in suggestions {
         let found = if text.contains(&s.original) { "" } else { "   [NOT IN THE TEXT]" };
-        println!("„{}“{found}\n    {}\n", s.original, s.reason);
+        let verdict = if task.has_verdict(&s.reason) { "" } else { "   [NO VERDICT: starts unticked]" };
+        match s.kind {
+            wordcraft_assistant::Kind::Replace => println!("„{}“ → „{}“{found}{verdict}\n    {}\n", s.original, s.replacement, s.reason),
+            wordcraft_assistant::Kind::Comment => println!("„{}“{found}{verdict}\n    {}\n", s.original, s.reason),
+        }
     }
     Ok(())
 }
