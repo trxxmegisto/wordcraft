@@ -125,15 +125,37 @@ impl AssistantPane {
             return;
         }
         let report = apply(&mut app.session, &chosen, DEFAULT_AUTHOR);
-        self.rows.retain(|r| !r.chosen);
-        let mut msg = format!("{} übernommen.", report.applied);
-        if !report.not_found.is_empty() {
-            msg.push_str(&format!(" {} Textstellen nicht gefunden.", report.not_found.len()));
+        // Applied rows leave the list; the ones that weren't found or failed stay, unticked, so
+        // the writer sees which.
+        let kept = |r: &Row| report.not_found.contains(&r.suggestion.original) || report.failed.iter().any(|(o, _)| *o == r.suggestion.original);
+        self.rows.retain(|r| !r.chosen || kept(r));
+        for r in &mut self.rows {
+            r.chosen = false;
         }
-        if !report.failed.is_empty() {
-            msg.push_str(&format!(" {} fehlgeschlagen.", report.failed.len()));
-        }
-        self.message = Some(msg);
+        self.message = Some(report_message(report.applied, report.not_found.len(), report.failed.len()));
+    }
+}
+
+/// "2 übernommen. 1 Textstelle nicht gefunden." — singular and plural as German needs them.
+pub fn report_message(applied: usize, not_found: usize, failed: usize) -> String {
+    let mut msg = format!("{applied} übernommen.");
+    match not_found {
+        0 => {}
+        1 => msg.push_str(" 1 Textstelle nicht gefunden."),
+        n => msg.push_str(&format!(" {n} Textstellen nicht gefunden.")),
+    }
+    if failed > 0 {
+        msg.push_str(&format!(" {failed} fehlgeschlagen."));
+    }
+    msg
+}
+
+/// How a suggestion is shown in the list.
+pub fn headline(s: &Suggestion) -> String {
+    match s.kind {
+        Kind::Replace if s.replacement.is_empty() => format!("„{}“ streichen", s.original),
+        Kind::Replace => format!("„{}“ → „{}“", s.original, s.replacement),
+        Kind::Comment => format!("„{}“", s.original),
     }
 }
 
@@ -200,11 +222,7 @@ impl PaneExtension for AssistantPane {
             for row in &mut self.rows {
                 ui.separator();
                 let s = &row.suggestion;
-                let head = match s.kind {
-                    Kind::Replace => format!("„{}“ → „{}“", s.original, s.replacement),
-                    Kind::Comment => format!("„{}“", s.original),
-                };
-                ui.checkbox(&mut row.chosen, RichText::new(head).strong());
+                ui.checkbox(&mut row.chosen, RichText::new(headline(s)).strong());
                 if !s.reason.is_empty() {
                     ui.label(&s.reason);
                 }

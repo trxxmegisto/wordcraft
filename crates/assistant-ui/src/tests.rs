@@ -5,7 +5,7 @@ use wordcraft_engine::doc::Document;
 use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_egui::panes::PaneExtension;
 
-use crate::{AssistantPane, KEY, MAX_INPUT_CHARS, Scope, input_text, install};
+use crate::{AssistantPane, KEY, MAX_INPUT_CHARS, Scope, headline, input_text, install, report_message};
 
 fn app(text: &str) -> WordApp {
     WordApp::new(Session::new(Document::from_text(text)), Default::default())
@@ -69,10 +69,13 @@ fn only_ticked_suggestions_go_into_the_document_as_revisions() {
     pane.apply_chosen(&mut app);
     assert_eq!(body_text(&mut app), "Der Hund rannte nach Hause.");
     assert!(app.session.doc.comments.is_empty(), "the unticked comment stayed out");
-    assert_eq!(pane.rows.len(), 1, "applied ones leave the list");
-    assert!(pane.message.as_deref().unwrap_or_default().contains("1 Textstellen nicht gefunden"), "{:?}", pane.message);
+    let left: Vec<&str> = pane.rows.iter().map(|r| r.suggestion.original.as_str()).collect();
+    assert_eq!(left, ["Hund", "Katze"], "applied ones leave the list; the unticked and the missing one stay");
+    assert!(pane.rows.iter().all(|r| !r.chosen), "what stays is unticked");
+    assert_eq!(pane.message.as_deref(), Some("1 übernommen. 1 Textstelle nicht gefunden."));
     pane.rows[0].chosen = true;
     pane.apply_chosen(&mut app);
+    assert_eq!(pane.rows.len(), 1);
     assert!(app.session.doc.comments.values().all(|c| c.author == DEFAULT_AUTHOR));
     app.run("review.rejectAll", json!({})).unwrap();
     assert_eq!(body_text(&mut app), "Der Hund lief schnell nach Hause.");
@@ -119,4 +122,14 @@ fn an_unreachable_flowise_comes_back_as_a_message() {
     }
     assert!(!pane.busy());
     assert!(pane.message.as_deref().unwrap_or_default().contains("can't be reached"), "{:?}", pane.message);
+}
+
+#[test]
+fn deletions_read_as_such_and_messages_count_in_german() {
+    assert_eq!(headline(&replace("eigentlich", "")), "„eigentlich“ streichen");
+    assert_eq!(headline(&replace("lief schnell", "rannte")), "„lief schnell“ → „rannte“");
+    assert_eq!(headline(&comment("Hund", "?")), "„Hund“");
+    assert_eq!(report_message(2, 0, 0), "2 übernommen.");
+    assert_eq!(report_message(0, 1, 0), "0 übernommen. 1 Textstelle nicht gefunden.");
+    assert_eq!(report_message(1, 3, 2), "1 übernommen. 3 Textstellen nicht gefunden. 2 fehlgeschlagen.");
 }

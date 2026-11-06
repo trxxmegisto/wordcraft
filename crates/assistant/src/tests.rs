@@ -166,3 +166,18 @@ mod flowise {
         assert!(answer_text(r#"{"error":"x"}"#).is_err());
     }
 }
+
+#[test]
+fn a_deletion_takes_one_neighbouring_space_with_it() {
+    for (text, gone, expected) in [
+        ("Er war eigentlich müde.", "eigentlich", "Er war müde."),
+        ("Er war müde, eigentlich.", "eigentlich", "Er war müde,."), // no space after: takes the one before
+        ("Eigentlich", "Eigentlich", ""),
+    ] {
+        let mut s = Session::new(Document::from_text(text));
+        let report = apply(&mut s, &[replace(gone, "")], DEFAULT_AUTHOR);
+        assert_eq!(report.applied, 1, "{text}: {report:?}");
+        s.run("review.acceptAll", &json!({})).unwrap();
+        assert_eq!(body_text(&mut s), expected, "{text}");
+    }
+}

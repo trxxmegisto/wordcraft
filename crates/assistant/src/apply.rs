@@ -42,7 +42,7 @@ pub fn apply(session: &mut Session, suggestions: &[Suggestion], author: &str) ->
         return report;
     }
     for s in suggestions {
-        if session.run("select.text", &json!({"text": s.original})).is_err() {
+        if !select_passage(session, s) {
             report.not_found.push(s.original.clone());
             continue;
         }
@@ -60,4 +60,15 @@ pub fn apply(session: &mut Session, suggestions: &[Suggestion], author: &str) ->
     }
     session.author = saved_author;
     report
+}
+
+/// Select the suggestion's passage. A deletion (an empty replacement) takes one space next to
+/// the passage with it, the following one if there is one, so no double space is left behind.
+fn select_passage(session: &mut Session, s: &Suggestion) -> bool {
+    let select = |session: &mut Session, text: &str| session.run("select.text", &json!({"text": text})).is_ok();
+    let deletion = s.kind == Kind::Replace && s.replacement.is_empty() && !s.original.starts_with(' ') && !s.original.ends_with(' ');
+    if deletion && (select(session, &format!("{} ", s.original)) || select(session, &format!(" {}", s.original))) {
+        return true;
+    }
+    select(session, &s.original)
 }
