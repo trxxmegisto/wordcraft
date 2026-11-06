@@ -36,6 +36,16 @@ impl Task {
         }
     }
 
+    /// Author name the task's revisions and comments carry, so the Review tools tell the tasks
+    /// apart (and give each its own colour).
+    pub fn author(self) -> &'static str {
+        match self {
+            Task::Lektorat => "Lektorat (KI)",
+            Task::Recherche => "Recherche (KI)",
+            Task::Konsistenz => "Konsistenz (KI)",
+        }
+    }
+
     fn instructions(self) -> &'static str {
         match self {
             Task::Lektorat => {

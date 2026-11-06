@@ -142,7 +142,7 @@ mod flowise {
     #[test]
     fn refuses_bad_addresses_and_flow_ids() {
         let mut c = config();
-        assert!(c.endpoint(Task::Recherche).is_err(), "no flow set");
+        assert!(FlowiseConfig::default().endpoint(Task::Recherche).is_err(), "no flow set at all");
         c.base_url = "file:///etc".into();
         assert!(c.endpoint(Task::Lektorat).is_err());
         c.base_url = "http://localhost:3000".into();
@@ -165,6 +165,23 @@ mod flowise {
         assert!(answer_text("<html>").is_err());
         assert!(answer_text(r#"{"error":"x"}"#).is_err());
     }
+    #[test]
+    fn tasks_without_their_own_chatflow_use_the_lektorat_one() {
+        let mut c = config();
+        let lektorat = c.endpoint(Task::Lektorat).unwrap();
+        assert_eq!(c.endpoint(Task::Recherche).unwrap(), lektorat);
+        assert_eq!(c.endpoint(Task::Konsistenz).unwrap(), lektorat);
+        c.recherche_flow = "aaaa-1111".into();
+        assert!(c.endpoint(Task::Recherche).unwrap().ends_with("/aaaa-1111"));
+        c.konsistenz_flow = "   ".into();
+        assert_eq!(c.endpoint(Task::Konsistenz).unwrap(), lektorat, "blank counts as empty");
+    }
+
+    #[test]
+    fn messages_are_german() {
+        let e = FlowiseConfig::default().endpoint(Task::Recherche).unwrap_err().to_string();
+        assert_eq!(e, "Der Assistent ist nicht eingerichtet: Für Recherche ist keine Chatflow-ID eingetragen.");
+    }
 }
 
 #[test]
@@ -180,4 +197,11 @@ fn a_deletion_takes_one_neighbouring_space_with_it() {
         s.run("review.acceptAll", &json!({})).unwrap();
         assert_eq!(body_text(&mut s), expected, "{text}");
     }
+}
+
+#[test]
+fn each_task_signs_with_its_own_name() {
+    let names: Vec<&str> = Task::ALL.iter().map(|t| t.author()).collect();
+    assert_eq!(names, ["Lektorat (KI)", "Recherche (KI)", "Konsistenz (KI)"]);
+    assert_eq!(Task::Lektorat.author(), DEFAULT_AUTHOR);
 }

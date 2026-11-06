@@ -6851,7 +6851,9 @@ dependencies = [
  "egui",
  "log",
  "serde_json",
+ "tempfile",
  "wordcraft-assistant",
+ "wordcraft-control-key",
  "wordcraft-engine",
  "wordcraft-ui-egui",
 ]

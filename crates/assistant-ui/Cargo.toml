@@ -13,8 +13,11 @@ workspace = true
 wordcraft-assistant = { workspace = true }
 wordcraft-engine = { workspace = true }
 wordcraft-ui-egui = { workspace = true }
+serde_json = { workspace = true }
+# Where WordCraft keeps its settings (the assistant's connection settings go next to them).
+wordcraft-control-key = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
+tempfile = "3"

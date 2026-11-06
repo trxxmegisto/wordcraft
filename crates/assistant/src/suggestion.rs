@@ -59,14 +59,14 @@ impl Suggestion {
 /// with a `suggestions` array, or either embedded in other text. Items that don't fit the
 /// format are skipped (and logged), not fatal. An answer with no JSON at all is an error.
 pub fn parse_suggestions(answer: &str) -> Result<Vec<Suggestion>, AssistantError> {
-    let value = find_json(answer).ok_or_else(|| AssistantError::Format("no JSON list of suggestions in the answer".into()))?;
+    let value = find_json(answer).ok_or_else(|| AssistantError::Format("Sie enthält keine JSON-Liste mit Vorschlägen.".into()))?;
     let items = match value {
         Value::Array(items) => items,
         Value::Object(mut o) => match o.remove("suggestions") {
             Some(Value::Array(items)) => items,
-            _ => return Err(AssistantError::Format("expected a list of suggestions".into())),
+            _ => return Err(AssistantError::Format("Erwartet wurde eine Liste von Vorschlägen.".into())),
         },
-        _ => return Err(AssistantError::Format("expected a list of suggestions".into())),
+        _ => return Err(AssistantError::Format("Erwartet wurde eine Liste von Vorschlägen.".into())),
     };
     let mut out = Vec::new();
     for item in items.into_iter().take(MAX_SUGGESTIONS) {

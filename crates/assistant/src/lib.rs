@@ -20,20 +20,20 @@ pub use apply::{ApplyReport, DEFAULT_AUTHOR, apply};
 pub use prompt::{Task, question};
 pub use suggestion::{Kind, MAX_FIELD_CHARS, MAX_SUGGESTIONS, Suggestion, parse_suggestions};
 
-/// Errors from the assistant.
+/// Errors from the assistant. Their messages are German: they are shown to the writer as they are.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum AssistantError {
     /// The assistant isn't set up (no address or no workflow for the task).
-    #[error("the assistant isn't set up: {0}")]
+    #[error("Der Assistent ist nicht eingerichtet: {0}")]
     NotConfigured(String),
     /// Nothing answered, or the connection broke.
-    #[error("the assistant service can't be reached: {0}")]
+    #[error("Flowise ist nicht erreichbar: {0}")]
     Unreachable(String),
     /// The service answered with an HTTP error status.
-    #[error("the assistant service answered with HTTP status {0}")]
+    #[error("Flowise hat mit HTTP-Status {0} geantwortet.")]
     Http(u16),
     /// The answer isn't in the agreed format.
-    #[error("the assistant's answer can't be used: {0}")]
+    #[error("Die Antwort ist nicht verwendbar: {0}")]
     Format(String),
 }
 

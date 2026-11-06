@@ -45,13 +45,15 @@ impl Default for FlowiseConfig {
 }
 
 impl FlowiseConfig {
-    /// The chatflow id for `task` (may be empty).
+    /// The chatflow id for `task`: its own, else the Lektorat chatflow (one chatflow can serve
+    /// every task, since the question carries the task's instructions). May be empty.
     pub fn flow(&self, task: Task) -> &str {
-        match task {
+        let own = match task {
             Task::Lektorat => &self.lektorat_flow,
             Task::Recherche => &self.recherche_flow,
             Task::Konsistenz => &self.konsistenz_flow,
-        }
+        };
+        if own.trim().is_empty() { &self.lektorat_flow } else { own }
     }
 
     /// The prediction URL for `task`, checked: an `http(s)` base and a flow id of letters,
@@ -59,14 +61,17 @@ impl FlowiseConfig {
     pub fn endpoint(&self, task: Task) -> Result<String, AssistantError> {
         let base = self.base_url.trim().trim_end_matches('/');
         if !(base.starts_with("http://") || base.starts_with("https://")) {
-            return Err(AssistantError::NotConfigured("the Flowise address must start with http:// or https://".into()));
+            return Err(AssistantError::NotConfigured("Die Flowise-Adresse muss mit http:// oder https:// beginnen.".into()));
         }
         let flow = self.flow(task).trim();
         if flow.is_empty() {
-            return Err(AssistantError::NotConfigured(format!("no Flowise chatflow set for {}", task.label())));
+            return Err(AssistantError::NotConfigured(format!("Für {} ist keine Chatflow-ID eingetragen.", task.label())));
         }
         if !flow.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return Err(AssistantError::NotConfigured(format!("the chatflow id for {} isn't valid", task.label())));
+            return Err(AssistantError::NotConfigured(format!(
+                "Die Chatflow-ID für {} ist ungültig (nur Buchstaben, Ziffern und Bindestriche).",
+                task.label()
+            )));
         }
         Ok(format!("{base}/api/v1/prediction/{flow}"))
     }
@@ -116,12 +121,12 @@ fn map_error(e: ureq::Error) -> AssistantError {
 /// The model's answer inside a Flowise prediction response: `text`, or `json` for chatflows with
 /// structured output.
 pub fn answer_text(raw: &str) -> Result<String, AssistantError> {
-    let v: Value = serde_json::from_str(raw).map_err(|e| AssistantError::Format(format!("Flowise didn't answer with JSON: {e}")))?;
+    let v: Value = serde_json::from_str(raw).map_err(|e| AssistantError::Format(format!("Flowise hat kein JSON geliefert ({e}).")))?;
     if let Some(text) = v.get("text").and_then(Value::as_str) {
         return Ok(text.to_string());
     }
     if let Some(structured) = v.get("json") {
         return Ok(structured.to_string());
     }
-    Err(AssistantError::Format("Flowise's answer has no `text`".into()))
+    Err(AssistantError::Format("In der Antwort von Flowise fehlt das Feld `text`.".into()))
 }

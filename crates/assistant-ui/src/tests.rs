@@ -1,5 +1,5 @@
 use serde_json::json;
-use wordcraft_assistant::{AssistantError, DEFAULT_AUTHOR, Kind, Suggestion, Task};
+use wordcraft_assistant::{AssistantError, Kind, Suggestion, Task};
 use wordcraft_engine::Session;
 use wordcraft_engine::doc::Document;
 use wordcraft_ui_egui::WordApp;
@@ -76,7 +76,7 @@ fn only_ticked_suggestions_go_into_the_document_as_revisions() {
     pane.rows[0].chosen = true;
     pane.apply_chosen(&mut app);
     assert_eq!(pane.rows.len(), 1);
-    assert!(app.session.doc.comments.values().all(|c| c.author == DEFAULT_AUTHOR));
+    assert!(app.session.doc.comments.values().all(|c| c.author == "Lektorat (KI)"));
     app.run("review.rejectAll", json!({})).unwrap();
     assert_eq!(body_text(&mut app), "Der Hund lief schnell nach Hause.");
 }
@@ -121,7 +121,8 @@ fn an_unreachable_flowise_comes_back_as_a_message() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     assert!(!pane.busy());
-    assert!(pane.message.as_deref().unwrap_or_default().contains("can't be reached"), "{:?}", pane.message);
+    assert!(pane.message_is_error);
+    assert!(pane.message.as_deref().unwrap_or_default().contains("Flowise ist nicht erreichbar"), "{:?}", pane.message);
 }
 
 #[test]
@@ -132,4 +133,56 @@ fn deletions_read_as_such_and_messages_count_in_german() {
     assert_eq!(report_message(2, 0, 0), "2 übernommen.");
     assert_eq!(report_message(0, 1, 0), "0 übernommen. 1 Textstelle nicht gefunden.");
     assert_eq!(report_message(1, 3, 2), "1 übernommen. 3 Textstellen nicht gefunden. 2 fehlgeschlagen.");
+}
+
+#[test]
+fn suggestions_sign_with_the_task_they_came_from() {
+    let mut app = app("Der Hund lief.");
+    let mut pane = AssistantPane::new();
+    pane.rows_task = Task::Recherche;
+    pane.task = Task::Konsistenz; // switching the tab afterwards doesn't change who wrote them
+    pane.receive(Ok(vec![comment("Hund", "Rasse prüfen")]));
+    pane.apply_chosen(&mut app);
+    let authors: Vec<&str> = app.session.doc.comments.values().map(|c| c.author.as_str()).collect();
+    assert_eq!(authors, ["Recherche (KI)"]);
+}
+
+#[test]
+fn problems_are_marked_and_say_what_to_do() {
+    let mut pane = AssistantPane::new();
+    pane.receive(Err(AssistantError::NotConfigured("Für Recherche ist keine Chatflow-ID eingetragen.".into())));
+    assert!(pane.message_is_error);
+    assert!(pane.message.as_deref().unwrap_or_default().ends_with("Siehe „Verbindung“ unten."), "{:?}", pane.message);
+    pane.receive(Ok(vec![comment("Hund", "?")]));
+    assert!(!pane.message_is_error, "a good answer clears the error look");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn connection_settings_are_kept_but_never_the_api_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sub").join(crate::SETTINGS_FILE);
+    let mut pane = AssistantPane::new().with_settings_file(path.clone());
+    pane.save_settings();
+    assert!(!path.exists(), "nothing changed, nothing written");
+    pane.config.base_url = "http://flowise.local:3000".into();
+    pane.config.recherche_flow = "aaaa-1111".into();
+    pane.config.api_key = Some("geheim".into());
+    pane.save_settings();
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("aaaa-1111") && !saved.contains("geheim"), "{saved}");
+    let again = crate::backend::load(&path);
+    assert_eq!(again.recherche_flow, "aaaa-1111");
+    assert_eq!(again.base_url, "http://flowise.local:3000");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn broken_or_huge_settings_files_fall_back_to_the_defaults() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(crate::SETTINGS_FILE);
+    for junk in ["", "{", "[1,2]", "{\"base_url\": 42}", &"x".repeat(100_000)] {
+        std::fs::write(&path, junk).unwrap();
+        assert_eq!(crate::backend::load(&path), Default::default(), "{}", junk.len());
+    }
 }
