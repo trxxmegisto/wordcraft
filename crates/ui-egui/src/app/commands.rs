@@ -565,6 +565,7 @@ impl WordApp {
                 json!({"pending": "contextMenu"})
             }
             "ui.paneDock" => return Some(panes::dock_command(self, p)),
+            "ui.extensionPane" => return Some(panes::extension_command(self, p)), // assistant-hook (KWordCraft)
             "ui.collapseRibbon" => {
                 self.ui.ribbon_collapsed = !self.ui.ribbon_collapsed;
                 json!({"collapsed": self.ui.ribbon_collapsed})

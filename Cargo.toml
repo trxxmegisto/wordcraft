@@ -35,6 +35,7 @@ wordcraft-engine = { path = "crates/engine" }
 wordcraft-mcp = { path = "crates/mcp" }
 wordcraft-zotero = { path = "crates/zotero" }
 wordcraft-assistant = { path = "crates/assistant" } # assistant-hook (KWordCraft)
+wordcraft-assistant-ui = { path = "crates/assistant-ui" } # assistant-hook (KWordCraft)
 wordcraft-control-key = { path = "crates/control-key" }
 wordcraft-ui-egui = { path = "crates/ui-egui" }
 wordcraft-metafile = { path = "crates/metafile" }

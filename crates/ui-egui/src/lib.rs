@@ -748,6 +748,8 @@ pub struct WordApp {
     pub(crate) outline_prev_tab: Option<String>,
     /// Zotero commands in flight (`ui.zotero.*`).
     pub zotero: zotero::ZoteroLink,
+    /// Task panes registered from outside this crate ([`WordApp::register_pane`]).
+    pub pane_extensions: panes::PaneExtensions, // assistant-hook (KWordCraft)
     /// The egui context, once the first frame has run (background work wakes the UI with it).
     pub(crate) ctx: Option<egui::Context>,
     /// Whether the current command was entered by an input method's own transaction. The engine

@@ -3,8 +3,9 @@ use super::{BTreeMap, Edge, Pane, PaneLabels, PaneState, Place, StylesPaneDock, 
 /// Every pane in the order the user left them (`paneOrder` in `ui.json`), then the panes that
 /// list lacks in their default order. Each edge shows its panes in this order, the first outermost.
 fn order(app: &WordApp) -> Vec<Pane> {
-    let mut order: Vec<Pane> = app.ui.pane_order.iter().filter_map(|key| Pane::from_key(key)).collect();
-    for pane in Pane::ALL {
+    let mut order: Vec<Pane> = app.ui.pane_order.iter().filter_map(|key| Pane::from_key(key).or_else(|| app.pane_extensions.pane(key))).collect(); // assistant-hook (KWordCraft)
+    for pane in Pane::ALL.into_iter().chain(app.pane_extensions.panes()) {
+        // assistant-hook (KWordCraft)
         if !order.contains(&pane) {
             order.push(pane);
         }
@@ -54,6 +55,7 @@ pub fn open(app: &WordApp) -> Vec<Pane> {
     .into_iter()
     .filter_map(|(pane, shown)| shown.then_some(pane))
     .collect::<Vec<_>>();
+    open.extend(app.pane_extensions.open()); // assistant-hook (KWordCraft)
     let order = order(app);
     open.sort_by_key(|pane| order.iter().position(|p| p == pane).unwrap_or(usize::MAX));
     open

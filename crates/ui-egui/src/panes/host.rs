@@ -111,7 +111,7 @@ pub(crate) fn apply(app: &mut WordApp, request: PaneRequest<Pane>) {
 /// it on their edge, as a drop over a docked pane does; `null` puts it after every pane.
 pub(crate) fn dock_command(app: &mut WordApp, p: &Value) -> Result<Value, String> {
     let key = p.get("pane").and_then(Value::as_str).ok_or("`pane` must be a task pane's key, such as \"navigation\"")?;
-    let pane = Pane::from_key(key).ok_or_else(|| format!("unknown task pane `{key}`"))?;
+    let pane = Pane::from_key(key).or_else(|| app.pane_extensions.pane(key)).ok_or_else(|| format!("unknown task pane `{key}`"))?; // assistant-hook (KWordCraft)
     let dock = match p.get("dock") {
         None => None,
         Some(v) => Some(match v.as_str() {
@@ -124,7 +124,8 @@ pub(crate) fn dock_command(app: &mut WordApp, p: &Value) -> Result<Value, String
     let before = match p.get("before") {
         None => None,
         Some(Value::Null) => Some(None),
-        Some(v) => match v.as_str().and_then(Pane::from_key) {
+        Some(v) => match v.as_str().and_then(|k| Pane::from_key(k).or_else(|| app.pane_extensions.pane(k))) {
+            // assistant-hook (KWordCraft)
             Some(before) if before != pane => Some(Some(before)),
             _ => return Err("`before` must be another task pane's key or null".into()),
         },
@@ -155,6 +156,7 @@ fn close(app: &mut WordApp, pane: Pane) {
             let _ = app.run(id, json!({"value": false}));
         }
         None if pane == Pane::Proofing => app.spelling_review = None,
+        None if let Pane::Extension(key) = pane => app.pane_extensions.set_open(key, false), // assistant-hook (KWordCraft)
         None => app.restrict.open = false,
     }
 }

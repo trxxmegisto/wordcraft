@@ -1,0 +1,20 @@
+[package]
+name = "wordcraft-assistant-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "WordCraft writing assistant's task pane (KWordCraft fork), plugged into wordcraft-ui-egui's pane extension point"
+
+[lints]
+workspace = true
+
+[dependencies]
+wordcraft-assistant = { workspace = true }
+wordcraft-engine = { workspace = true }
+wordcraft-ui-egui = { workspace = true }
+egui = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

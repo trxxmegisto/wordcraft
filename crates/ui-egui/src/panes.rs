@@ -18,6 +18,7 @@ use crate::WordApp;
 use crate::theme::{Tokens, regular, semibold};
 
 mod comments;
+mod extension; // assistant-hook (KWordCraft)
 mod host;
 mod inspector;
 mod nav;
@@ -30,6 +31,8 @@ use comments::comments;
 pub(crate) use comments::{
     COMMENT_ROWS, CommentDrafts, comment_editor, commit_comment, commit_reply, flush_comment_drafts, has_comment_drafts, reply_editor,
 };
+pub(crate) use extension::command as extension_command; // assistant-hook (KWordCraft)
+pub use extension::{PaneExtension, PaneExtensions}; // assistant-hook (KWordCraft)
 use host::Content;
 #[cfg(test)]
 pub(crate) use host::apply;
@@ -62,6 +65,8 @@ pub enum Pane {
     RestrictEditing,
     Proofing,
     Comments,
+    /// A pane registered from outside this crate, by its key ([`PaneExtension`]).
+    Extension(&'static str), // assistant-hook (KWordCraft)
 }
 
 impl Pane {
@@ -78,6 +83,7 @@ impl Pane {
             Self::RestrictEditing => "Restrict Editing",
             Self::Proofing => "Proofing",
             Self::Comments => "Comments",
+            Self::Extension(key) => key, // assistant-hook (KWordCraft)
         }
     }
 
@@ -94,6 +100,7 @@ impl Pane {
             Self::RestrictEditing => (Edge::End, 270.0),
             Self::Proofing => (Edge::End, 400.0),
             Self::Comments => (Edge::End, 290.0),
+            Self::Extension(_) => (Edge::End, 300.0), // assistant-hook (KWordCraft)
         };
         PaneState::docked(edge, width)
     }
@@ -112,6 +119,7 @@ impl Pane {
             Self::RestrictEditing => "restrictEditing",
             Self::Proofing => "proofing",
             Self::Comments => "comments",
+            Self::Extension(key) => key, // assistant-hook (KWordCraft)
         }
     }
 
@@ -146,12 +154,16 @@ impl Pane {
             Self::FormatShape => Some("view.formatShapePane"),
             Self::Comments => Some("view.commentsPane"),
             Self::RestrictEditing | Self::Proofing => None,
+            Self::Extension(_) => None, // assistant-hook (KWordCraft)
         }
     }
 }
 
 impl PaneContent<Pane> for Content<'_> {
     fn title(&self, pane: &Pane) -> String {
+        if let Pane::Extension(key) = pane {
+            return self.app.pane_extensions.title(key).unwrap_or_else(|| (*key).into()); // assistant-hook (KWordCraft)
+        }
         tl!(pane.title()).into()
     }
 
@@ -171,6 +183,7 @@ impl PaneContent<Pane> for Content<'_> {
             Pane::RestrictEditing => crate::dialogs_review::restrict_pane(app, ui),
             Pane::Proofing => crate::proofing_pane::show(app, ui),
             Pane::Comments => comments(app, ui),
+            Pane::Extension(key) => extension::body(app, ui, key), // assistant-hook (KWordCraft)
         })
     }
 
