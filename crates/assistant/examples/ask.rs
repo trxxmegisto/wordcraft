@@ -8,7 +8,8 @@
 //!
 //! The task is `lektorat`, `recherche` or `konsistenz`. The settings come from `assistant.json`
 //! in WordCraft's settings folder (or the path in `WORDCRAFT_ASSISTANT_SETTINGS`); the API key
-//! from `WORDCRAFT_FLOWISE_API_KEY`.
+//! from `WORDCRAFT_FLOWISE_API_KEY`. With `WORDCRAFT_ASSISTANT_RAW` set it prints Flowise's raw answer
+//! instead.
 
 use std::error::Error;
 
@@ -31,6 +32,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut config: FlowiseConfig = serde_json::from_str(&std::fs::read_to_string(&settings)?)?;
     config.api_key = std::env::var("WORDCRAFT_FLOWISE_API_KEY").ok();
     eprintln!("{} via {} …", task.label(), config.endpoint(task)?);
+    if std::env::var_os("WORDCRAFT_ASSISTANT_RAW").is_some() {
+        // Print the chatflow's raw answer, to see what the parser gets.
+        let body = serde_json::json!({ "question": wordcraft_assistant::question(task, &text) }).to_string();
+        let mut response = ureq::post(&config.endpoint(task)?).header("Content-Type", "application/json").send(body.as_str())?;
+        println!("{}", response.body_mut().read_to_string()?);
+        return Ok(());
+    }
     let started = std::time::Instant::now();
     let suggestions = FlowiseAssistant::new(config).ask(task, &text)?;
     eprintln!("{} suggestions in {:.0?}\n", suggestions.len(), started.elapsed());
