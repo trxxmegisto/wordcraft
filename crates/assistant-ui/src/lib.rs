@@ -26,7 +26,14 @@ pub const SETTINGS_FILE: &str = "assistant.json";
 /// Register the assistant pane on `app`; it opens at start when a Flowise chatflow is set up.
 /// `ui.extensionPane {"pane": "assistant"}` shows or hides it. The connection settings are kept
 /// in [`SETTINGS_FILE`] in WordCraft's settings folder, unless `WORDCRAFT_NO_PREFS` is set.
+///
+/// It also turns off the update check at start (call it after the app turns that on): the
+/// official updater would replace this build with upstream's, which has no assistant, and the
+/// fork's version number lags upstream's releases, so it would always offer one. The fork is
+/// updated with `kwordcraft/update-wordcraft.ps1`.
 pub fn install(app: &mut WordApp) {
+    #[cfg(not(target_arch = "wasm32"))]
+    app.set_startup_update_check(false);
     #[cfg_attr(target_arch = "wasm32", expect(unused_mut))]
     let mut pane = AssistantPane::new();
     #[cfg(not(target_arch = "wasm32"))]
