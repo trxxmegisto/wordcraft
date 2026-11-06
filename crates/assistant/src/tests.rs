@@ -205,3 +205,38 @@ fn each_task_signs_with_its_own_name() {
     assert_eq!(names, ["Lektorat (KI)", "Recherche (KI)", "Konsistenz (KI)"]);
     assert_eq!(Task::Lektorat.author(), DEFAULT_AUTHOR);
 }
+
+#[test]
+fn research_asks_for_a_verdict_not_a_reminder_to_check() {
+    let q = question(Task::Recherche, "Die Mauer fiel 1990.");
+    for must in ["\"Falsch:\"", "\"Zweifelhaft:\"", "\"Unklar:\"", "nie nur \"sollte überprüft werden\"", "allgemein bekannt", "Figurenrede"] {
+        assert!(q.contains(must), "missing {must}");
+    }
+    assert!(!question(Task::Lektorat, "x").contains("Faktenprüfer"), "only the research task gets these rules");
+}
+
+#[test]
+fn every_task_is_told_to_quote_exactly_even_when_the_text_is_wrong() {
+    for task in Task::ALL {
+        assert!(question(task, "x").contains("Zeichen für Zeichen, ohne Zahlen, Wörter oder Satzzeichen zu ändern"), "{task:?}");
+    }
+}
+
+#[test]
+fn a_slightly_misquoted_passage_still_gets_its_comment() {
+    let text = "Ihr Großvater sagte, dass die erste Glashütte 1597 gegründet worden war. Danach schwieg er.";
+    for quote in ["Die erste Glashütte 1597 gegründet worden war", "die erste Glashütte 1597 gegründet worden war.", "Die zweite Glashütte."] {
+        let mut s = Session::new(Document::from_text(text));
+        let report = apply(&mut s, &[comment(quote, "Zweifelhaft: …")], DEFAULT_AUTHOR);
+        let expect_found = !quote.contains("zweite");
+        assert_eq!(report.applied == 1, expect_found, "{quote}: {report:?}");
+    }
+}
+
+#[test]
+fn a_misquoted_replacement_is_left_alone() {
+    let mut s = Session::new(Document::from_text("Er sagte, dass es regnet."));
+    let report = apply(&mut s, &[replace("Dass es regnet", "es schneit")], DEFAULT_AUTHOR);
+    assert_eq!(report.not_found, vec!["Dass es regnet".to_string()], "only comments get the looser match");
+    assert_eq!(body_text(&mut s), "Er sagte, dass es regnet.");
+}

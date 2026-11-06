@@ -64,11 +64,38 @@ pub fn apply(session: &mut Session, suggestions: &[Suggestion], author: &str) ->
 
 /// Select the suggestion's passage. A deletion (an empty replacement) takes one space next to
 /// the passage with it, the following one if there is one, so no double space is left behind.
+///
+/// Models misquote in small, predictable ways, so a passage that isn't found is looked for again
+/// with its first letter in the other case and without a full stop it ended with. A replacement
+/// is only made on the passage exactly as quoted: a looser match could replace the wrong text.
 fn select_passage(session: &mut Session, s: &Suggestion) -> bool {
     let select = |session: &mut Session, text: &str| session.run("select.text", &json!({"text": text})).is_ok();
     let deletion = s.kind == Kind::Replace && s.replacement.is_empty() && !s.original.starts_with(' ') && !s.original.ends_with(' ');
     if deletion && (select(session, &format!("{} ", s.original)) || select(session, &format!(" {}", s.original))) {
         return true;
     }
-    select(session, &s.original)
+    if select(session, &s.original) {
+        return true;
+    }
+    s.kind == Kind::Comment && near_quotes(&s.original).iter().any(|q| select(session, q))
+}
+
+/// Close variants of a misquoted passage: the first letter in the other case, and without a
+/// trailing full stop (and both).
+fn near_quotes(original: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut chars = original.chars();
+    let swapped = chars.next().map(|first| {
+        let other: String = if first.is_uppercase() { first.to_lowercase().collect() } else { first.to_uppercase().collect() };
+        other + chars.as_str()
+    });
+    for candidate in [Some(original.to_string()), swapped].into_iter().flatten() {
+        if let Some(stripped) = candidate.strip_suffix('.').filter(|t| !t.trim().is_empty()) {
+            out.push(stripped.to_string());
+        }
+        if candidate != original {
+            out.push(candidate);
+        }
+    }
+    out
 }

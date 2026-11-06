@@ -56,10 +56,20 @@ impl Task {
                  eindeutige Lösung."
             }
             Task::Recherche => {
-                "Du unterstützt einen Autor bei der Recherche. Markiere Aussagen, Fakten, Daten, Orte und \
-                 Fachbegriffe, die geprüft werden sollten, und gib im Kommentar an, was zu prüfen ist und \
-                 wo man es nachschlagen kann. Nenne Quellen nur, wenn du dir sicher bist. Verwende \
-                 ausschließlich \"comment\"."
+                "Du bist Faktenprüfer für einen Romanautor. Prüfe die Tatsachenbehauptungen im Text \
+                 (Daten, Jahreszahlen, Orte, historische Ereignisse, Personen, Fachwissen) mit deinem Wissen.\n\
+                 Melde nur Stellen, die falsch sind oder bei denen ein begründeter Zweifel besteht. Melde \
+                 nichts, was allgemein bekannt und richtig ist, und keine Stelle nur deshalb, weil sie ein \
+                 Datum oder einen Ort enthält. Stimmt eine Angabe nach deinem Wissen, melde sie nicht, auch \
+                 nicht, um die Formulierung zu verbessern; Stil ist Sache des Lektorats. Lieber wenige gute Hinweise als viele allgemeine; höchstens zehn.\n\
+                 Jeder Kommentar beginnt mit einem Urteil: \"Falsch:\", \"Zweifelhaft:\" oder \"Unklar:\". \
+                 Bei \"Falsch:\" nenne den richtigen Sachverhalt, zum Beispiel \"Falsch: Die Berliner Mauer \
+                 fiel am 9. November 1989.\" Bei \"Zweifelhaft:\" sage, was nach deinem Wissen stimmt und \
+                 warum du zweifelst. Bei \"Unklar:\" sage konkret, was zu klären ist und wo (etwa \
+                 Ortschronik, Museum, Fachlexikon). Schreibe nie nur \"sollte überprüft werden\".\n\
+                 Behauptet eine Figur etwas Falsches, kann das gewollt sein: Markiere es trotzdem und \
+                 schreibe dazu \"(Figurenrede, eventuell beabsichtigt)\".\n\
+                 Nenne Quellen nur, wenn du dir sicher bist. Verwende ausschließlich \"comment\"."
             }
             Task::Konsistenz => {
                 "Du prüfst einen Romantext auf innere Widersprüche: Namen, Schreibweisen, Alter, Aussehen, \
@@ -72,6 +82,7 @@ impl Task {
 
 const FORMAT: &str = "Antworte ausschließlich mit einem JSON-Array, ohne weiteren Text. Jedes Element ist ein Objekt:\n\
 {\"kind\": \"replace\" oder \"comment\", \"original\": die betroffene Textstelle, zeichengenau und wörtlich aus dem Text kopiert, so kurz wie möglich, aber eindeutig, \"replacement\": der neue Text (nur bei replace), \"reason\": eine kurze Begründung auf Deutsch}.\n\
+\"original\" muss genau so im Text stehen: Kopiere die Stelle Zeichen für Zeichen, ohne Zahlen, Wörter oder Satzzeichen zu ändern, auch wenn sie falsch sind, und ohne Zeilenumbrüche; die Korrektur gehört in \"replacement\" oder \"reason\".\n\
 Wenn es nichts anzumerken gibt, antworte mit [].";
 
 /// The full question for `task` about `text`.
