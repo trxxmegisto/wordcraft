@@ -1,5 +1,6 @@
 //! The writing assistant's task pane (KWordCraft fork): pick a task (Lektorat, Recherche,
-//! Konsistenz), send the selection or the whole document to the Flowise workflow, review the
+//! Konsistenz), send the selection, a chapter or the whole document to the Flowise workflow (in
+//! portions when it is long), review the
 //! suggestions and put the chosen ones into the document as tracked changes and comments.
 //!
 //! The pane plugs into `wordcraft-ui-egui` through its extension point
@@ -7,7 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use egui::{RichText, Ui};
-use wordcraft_assistant::{AssistantError, Kind, Suggestion, Task, apply_as};
+use wordcraft_assistant::{AssistantError, Chapter, Kind, Suggestion, Task, apply_as, chapter_at, chapter_text, chapters};
 use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_egui::panes::PaneExtension;
 
@@ -17,8 +18,9 @@ mod backend;
 /// The pane's key (`ui.extensionPane {"pane": "assistant"}`, `ui.paneDock`).
 pub const KEY: &str = "assistant";
 
-/// Longest text sent in one request, in characters (a long manuscript goes chapter by chapter).
-pub const MAX_INPUT_CHARS: usize = 200_000;
+/// Longest text analysed in one run, in characters (about a long novel); it goes to Flowise in
+/// portions of the size set under „Verbindung“.
+pub const MAX_INPUT_CHARS: usize = 1_000_000;
 
 /// The file in the settings folder that keeps the connection settings (never the API key).
 pub const SETTINGS_FILE: &str = "assistant.json";
@@ -52,6 +54,8 @@ pub fn install(app: &mut WordApp) {
 pub enum Scope {
     /// The selected text (the whole document when nothing is selected).
     Selection,
+    /// The chosen chapter: from its heading to the next heading of the same or a higher level.
+    Chapter,
     /// The document's main text.
     Document,
 }
@@ -68,6 +72,8 @@ pub struct AssistantPane {
     open: bool,
     pub task: Task,
     pub scope: Scope,
+    /// The chapter picked for [`Scope::Chapter`] (None: the one with the cursor).
+    pub chapter: Option<Chapter>,
     pub rows: Vec<Row>,
     /// The task the listed suggestions came from: their revisions and comments carry its author.
     pub rows_task: Task,
@@ -90,6 +96,7 @@ impl Default for AssistantPane {
             open: false,
             task: Task::Lektorat,
             scope: Scope::Selection,
+            chapter: None,
             rows: Vec::new(),
             rows_task: Task::Lektorat,
             message: None,
@@ -180,6 +187,7 @@ impl AssistantPane {
                 self.rows = list.into_iter().map(|suggestion| Row { chosen: task.has_verdict(&suggestion.reason), suggestion }).collect();
                 let unticked = self.rows.iter().filter(|r| !r.chosen).count();
                 self.note(match unticked {
+                    0 if self.rows.len() == 1 => "1 Vorschlag.".to_string(),
                     0 => format!("{} Vorschläge.", self.rows.len()),
                     1 => format!("{} Vorschläge; einer ohne Urteil ist nicht ausgewählt.", self.rows.len()),
                     n => format!("{} Vorschläge; {n} ohne Urteil sind nicht ausgewählt.", self.rows.len()),
@@ -188,6 +196,20 @@ impl AssistantPane {
             Err(e @ AssistantError::Unreachable(_)) => self.problem(format!("{e} Läuft Flowise unter der eingetragenen Adresse?")),
             Err(e @ AssistantError::NotConfigured(_)) => self.problem(format!("{e} Siehe „Verbindung“ unten.")),
             Err(e) => self.problem(e.to_string()),
+        }
+    }
+
+    /// [`AssistantPane::receive`] for a text sent in `total` portions, the last one asked about
+    /// being `at` (counting from 0): says how many were checked, or at which one it failed.
+    pub fn receive_parts(&mut self, answer: Result<Vec<Suggestion>, AssistantError>, at: usize, total: usize) {
+        self.receive(answer);
+        if total > 1 {
+            let msg = self.message.take().unwrap_or_default();
+            self.message = Some(if self.message_is_error {
+                format!("Bei Teil {} von {total}: {msg}", at + 1)
+            } else {
+                format!("{msg} ({total} Teile geprüft.)")
+            });
         }
     }
 
@@ -238,14 +260,40 @@ pub fn headline(s: &Suggestion) -> String {
     }
 }
 
-/// The text to analyse: the selection, else the whole main text; capped at [`MAX_INPUT_CHARS`].
-pub fn input_text(app: &WordApp, scope: Scope) -> String {
-    let selected = app.session.selected_text();
+/// The text to analyse: the selection (else the whole main text), the chapter whose heading is
+/// body block `chapter`, or the whole main text; capped at [`MAX_INPUT_CHARS`]. Err (a German
+/// message) when the chapter is missing.
+pub fn input_text(app: &WordApp, scope: Scope, chapter: Option<usize>) -> Result<String, String> {
+    let whole = || app.session.doc.final_text(wordcraft_engine::doc::StoryRef::Body);
     let text = match scope {
-        Scope::Selection if !selected.trim().is_empty() => selected,
-        _ => app.session.doc.final_text(wordcraft_engine::doc::StoryRef::Body),
+        Scope::Selection => Some(app.session.selected_text()).filter(|t| !t.trim().is_empty()).unwrap_or_else(whole),
+        Scope::Chapter => {
+            let block = chapter.ok_or("Kein Kapitel ausgewählt.")?;
+            chapter_text(&app.session.doc, block).ok_or("Das Kapitel gibt es nicht mehr. Bitte neu auswählen.")?
+        }
+        Scope::Document => whole(),
     };
-    text.chars().take(MAX_INPUT_CHARS).collect()
+    Ok(text.chars().take(MAX_INPUT_CHARS).collect())
+}
+
+/// The top-level body block the cursor is in.
+fn cursor_block(app: &WordApp) -> Option<usize> {
+    let focus = &app.session.sel.focus;
+    if focus.story != wordcraft_engine::doc::StoryRef::Body {
+        return None;
+    }
+    focus.path.0.first().map(|b| *b as usize)
+}
+
+/// `picked` found again in `list` after edits: same heading block and title, else the same title,
+/// else none.
+pub fn find_again(picked: &Chapter, list: &[Chapter]) -> Option<Chapter> {
+    list.iter().find(|c| c.block == picked.block && c.title == picked.title).or_else(|| list.iter().find(|c| c.title == picked.title)).cloned()
+}
+
+/// How a chapter is listed: indented by its level.
+pub fn chapter_label(c: &Chapter) -> String {
+    format!("{}{}", "   ".repeat(usize::from(c.level.saturating_sub(1))), c.title)
 }
 
 impl PaneExtension for AssistantPane {
@@ -267,9 +315,12 @@ impl PaneExtension for AssistantPane {
 
     fn body(&mut self, app: &mut WordApp, ui: &mut Ui) {
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(answer) = self.pending.as_mut().and_then(backend::Pending::poll) {
+        if let Some(pending) = self.pending.as_mut()
+            && let Some(answer) = pending.poll()
+        {
+            let (at, total) = pending.progress;
             self.pending = None;
-            self.receive(answer);
+            self.receive_parts(answer, at, total);
         }
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -279,8 +330,12 @@ impl PaneExtension for AssistantPane {
             });
             ui.horizontal_wrapped(|ui| {
                 ui.radio_value(&mut self.scope, Scope::Selection, "Markierung");
+                ui.radio_value(&mut self.scope, Scope::Chapter, "Kapitel");
                 ui.radio_value(&mut self.scope, Scope::Document, "Ganzes Dokument");
             });
+            if self.scope == Scope::Chapter {
+                self.chapter_picker(app, ui);
+            }
             ui.add_space(4.0);
             self.ask_button(app, ui);
             if let Some(msg) = &self.message {
@@ -320,25 +375,61 @@ impl PaneExtension for AssistantPane {
 }
 
 impl AssistantPane {
+    /// The chapter list under the scope choice; keeps [`AssistantPane::chapter`] on the same
+    /// heading while the document changes.
+    fn chapter_picker(&mut self, app: &WordApp, ui: &mut Ui) {
+        let list = chapters(&app.session.doc);
+        if list.is_empty() {
+            self.chapter = None;
+            ui.small("Keine Überschriften gefunden. Kapitel beginnen bei Absätzen mit „Überschrift 1“ bis „Überschrift 9“.");
+            return;
+        }
+        self.chapter = self
+            .chapter
+            .as_ref()
+            .and_then(|picked| find_again(picked, &list))
+            .or_else(|| cursor_block(app).and_then(|b| chapter_at(&list, b)).cloned())
+            .or_else(|| list.first().cloned());
+        let shown = self.chapter.as_ref().map(|c| c.title.clone()).unwrap_or_default();
+        craft_ui::ComboBox::from_id_salt("assistant_chapter").selected_text(shown).width(ui.available_width()).show_ui(ui, |ui| {
+            for c in &list {
+                let picked = self.chapter.as_ref().is_some_and(|p| p.block == c.block);
+                if ui.selectable_label(picked, chapter_label(c)).clicked() {
+                    self.chapter = Some(c.clone());
+                }
+            }
+        });
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn ask_button(&mut self, app: &mut WordApp, ui: &mut Ui) {
         if self.busy() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label(format!("{} läuft …", self.task.label()));
+                match self.pending.as_ref().map(|p| p.progress) {
+                    Some((at, total)) if total > 1 => ui.label(format!("{} läuft … Teil {} von {total}", self.task.label(), at + 1)),
+                    _ => ui.label(format!("{} läuft …", self.task.label())),
+                };
             });
             return;
         }
         if ui.button(format!("{} starten", self.task.label())).clicked() {
-            let text = input_text(app, self.scope);
-            if text.trim().is_empty() {
+            let text = match input_text(app, self.scope, self.chapter.as_ref().map(|c| c.block)) {
+                Ok(text) => text,
+                Err(e) => {
+                    self.problem(e);
+                    return;
+                }
+            };
+            let portions = wordcraft_assistant::portions(&text, self.config.portion_chars);
+            if portions.is_empty() {
                 self.problem("Der Text ist leer.");
                 return;
             }
             self.message = None;
             self.rows.clear();
             self.rows_task = self.task;
-            self.pending = Some(backend::Pending::start(self.config.clone(), self.task, text, ui.ctx().clone()));
+            self.pending = Some(backend::Pending::start(self.config.clone(), self.task, portions, ui.ctx().clone()));
         }
     }
 
@@ -363,6 +454,14 @@ fn settings(ui: &mut Ui, config: &mut wordcraft_assistant::flowise::FlowiseConfi
             ui.end_row();
             ui.label("Konsistenz");
             ui.text_edit_singleline(&mut config.konsistenz_flow);
+            ui.end_row();
+            ui.label("Max. Zeichen");
+            ui.add(
+                egui::DragValue::new(&mut config.portion_chars)
+                    .range(wordcraft_assistant::MIN_PORTION_CHARS..=wordcraft_assistant::MAX_PORTION_CHARS)
+                    .speed(500),
+            )
+            .on_hover_text("So viele Zeichen gehen höchstens in eine Anfrage; längere Texte werden an Absatzgrenzen geteilt.");
             ui.end_row();
         });
         ui.small("Leere Felder nutzen den Lektorat-Chatflow.");

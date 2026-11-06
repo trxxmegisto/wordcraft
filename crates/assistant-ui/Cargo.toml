@@ -13,6 +13,8 @@ workspace = true
 wordcraft-assistant = { workspace = true }
 wordcraft-engine = { workspace = true }
 wordcraft-ui-egui = { workspace = true }
+# The combo box the app uses (egui's can't grow back while open); same rev as ui-egui's.
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "92d392cff132eaf53e13afff77f38b5c11b73aa0" }
 serde_json = { workspace = true }
 # Where WordCraft keeps its settings (the assistant's connection settings go next to them).
 wordcraft-control-key = { workspace = true }

@@ -6848,6 +6848,7 @@ dependencies = [
 name = "wordcraft-assistant-ui"
 version = "0.15.1"
 dependencies = [
+ "craft-ui",
  "egui",
  "log",
  "serde_json",

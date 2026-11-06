@@ -5,7 +5,7 @@ use wordcraft_engine::doc::Document;
 use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_egui::panes::PaneExtension;
 
-use crate::{AssistantPane, KEY, MAX_INPUT_CHARS, Scope, headline, input_text, install, report_message};
+use crate::{AssistantPane, KEY, MAX_INPUT_CHARS, Scope, chapter_label, find_again, headline, input_text, install, report_message};
 
 fn app(text: &str) -> WordApp {
     WordApp::new(Session::new(Document::from_text(text)), Default::default())
@@ -35,16 +35,16 @@ fn installs_as_a_task_pane_that_opens_by_command() {
 #[test]
 fn analyses_the_selection_or_else_the_whole_text() {
     let mut app = app("Der Hund lief schnell nach Hause.");
-    assert_eq!(input_text(&app, Scope::Selection), "Der Hund lief schnell nach Hause.", "nothing selected: the whole text");
+    assert_eq!(input_text(&app, Scope::Selection, None).unwrap(), "Der Hund lief schnell nach Hause.", "nothing selected: the whole text");
     app.run("select.text", json!({"text": "lief schnell"})).unwrap();
-    assert_eq!(input_text(&app, Scope::Selection), "lief schnell");
-    assert_eq!(input_text(&app, Scope::Document), "Der Hund lief schnell nach Hause.");
+    assert_eq!(input_text(&app, Scope::Selection, None).unwrap(), "lief schnell");
+    assert_eq!(input_text(&app, Scope::Document, None).unwrap(), "Der Hund lief schnell nach Hause.");
 }
 
 #[test]
 fn long_input_is_capped() {
     let app = app(&"ä".repeat(MAX_INPUT_CHARS + 10));
-    assert_eq!(input_text(&app, Scope::Document).chars().count(), MAX_INPUT_CHARS);
+    assert_eq!(input_text(&app, Scope::Document, None).unwrap().chars().count(), MAX_INPUT_CHARS);
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn an_unreachable_flowise_comes_back_as_a_message() {
     pane.config.base_url = "http://127.0.0.1:9".into();
     pane.config.lektorat_flow = "3f2a9c1e-0000-4abc-8def-123456789abc".into();
     pane.config.timeout_secs = 5;
-    pane.pending = Some(crate::backend::Pending::start(pane.config.clone(), Task::Lektorat, "Text".into(), egui::Context::default()));
+    pane.pending = Some(crate::backend::Pending::start(pane.config.clone(), Task::Lektorat, vec!["Text".into()], egui::Context::default()));
     let ctx = egui::Context::default();
     let start = std::time::Instant::now();
     while pane.busy() && start.elapsed() < std::time::Duration::from_secs(30) {
@@ -215,4 +215,71 @@ fn an_accepted_research_correction_replaces_the_wrong_fact() {
     assert_eq!(body_text(&mut app), "Als am 9. November 1989 die Mauer fiel.");
     let authors: Vec<&str> = app.session.doc.comments.values().map(|c| c.author.as_str()).collect();
     assert_eq!(authors, ["Recherche (KI)"]);
+}
+
+/// An app whose document is `(text, style)` paragraphs, the caret at the end.
+fn styled(paras: &[(&str, &str)]) -> WordApp {
+    let mut app = app("");
+    for (i, (text, style)) in paras.iter().enumerate() {
+        if i > 0 {
+            app.run("text.newParagraph", json!({})).unwrap();
+        }
+        app.run("text.insert", json!({"text": text})).unwrap();
+        app.run("para.style", json!({"style": style})).unwrap();
+    }
+    app
+}
+
+fn book() -> WordApp {
+    styled(&[("Kapitel 1", "Heading1"), ("Marta kam.", "Normal"), ("Kapitel 2", "Heading1"), ("Martha ging.", "Normal")])
+}
+
+#[test]
+fn analyses_the_chosen_chapter() {
+    let app = book();
+    assert_eq!(
+        input_text(&app, Scope::Chapter, Some(2)).unwrap(),
+        "Kapitel 2
+Martha ging.
+"
+    );
+    assert_eq!(input_text(&app, Scope::Chapter, None).unwrap_err(), "Kein Kapitel ausgewählt.");
+    assert!(input_text(&app, Scope::Chapter, Some(1)).unwrap_err().contains("neu auswählen"), "block 1 is no heading");
+}
+
+#[test]
+fn the_picked_chapter_is_found_again_after_edits() {
+    let app = book();
+    let list = wordcraft_assistant::chapters(&app.session.doc);
+    let picked = list[1].clone();
+    assert_eq!(find_again(&picked, &list), Some(picked.clone()));
+    // A paragraph inserted above moves the heading: found by its title.
+    let moved: Vec<_> = list.iter().map(|c| wordcraft_assistant::Chapter { block: c.block + 1, ..c.clone() }).collect();
+    assert_eq!(find_again(&picked, &moved).map(|c| c.block), Some(3));
+    // Renamed: gone, so the pane falls back to the chapter with the cursor.
+    let renamed: Vec<_> = list.iter().map(|c| wordcraft_assistant::Chapter { title: format!("{} neu", c.title), ..c.clone() }).collect();
+    assert_eq!(find_again(&picked, &renamed), None);
+    assert_eq!(chapter_label(&wordcraft_assistant::Chapter { block: 0, level: 3, title: "Szene".into() }), "      Szene");
+}
+
+#[test]
+fn the_chapter_with_the_cursor_is_picked_first() {
+    let mut app = book(); // the caret is in "Martha ging.", chapter 2
+    let mut pane = AssistantPane::new();
+    pane.scope = Scope::Chapter;
+    let ctx = egui::Context::default();
+    ctx.run_ui(egui::RawInput::default(), |ui| pane.body(&mut app, ui)).drop_without_applying_deltas();
+    assert_eq!(pane.chapter.as_ref().map(|c| c.title.as_str()), Some("Kapitel 2"));
+}
+
+#[test]
+fn several_portions_say_so_in_the_message() {
+    let mut pane = AssistantPane::new();
+    pane.receive_parts(Ok(vec![comment("Marta", "Name?")]), 2, 3);
+    assert_eq!(pane.message.as_deref(), Some("1 Vorschlag. (3 Teile geprüft.)"));
+    pane.receive_parts(Err(AssistantError::Http(500)), 1, 3);
+    assert!(pane.message_is_error);
+    assert_eq!(pane.message.as_deref(), Some("Bei Teil 2 von 3: Flowise hat mit HTTP-Status 500 geantwortet."));
+    pane.receive_parts(Ok(vec![]), 0, 1);
+    assert_eq!(pane.message.as_deref(), Some("Keine Anmerkungen."), "one portion: no count");
 }

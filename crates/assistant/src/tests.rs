@@ -274,3 +274,145 @@ fn research_notes_need_a_verdict() {
     assert!(!Task::Recherche.has_verdict("Das sollte überprüft werden."));
     assert!(Task::Lektorat.has_verdict("kürzer"), "other tasks take any reason");
 }
+
+/// A document of `(text, style)` paragraphs, in order.
+fn styled(paras: &[(&str, &str)]) -> Session {
+    let mut s = Session::new(Document::new());
+    for (i, (text, style)) in paras.iter().enumerate() {
+        if i > 0 {
+            s.run("text.newParagraph", &json!({})).unwrap();
+        }
+        s.run("text.insert", &json!({"text": text})).unwrap();
+        s.run("para.style", &json!({"style": style})).unwrap();
+    }
+    s
+}
+
+fn book() -> Session {
+    styled(&[
+        ("Vorwort", "Normal"),
+        ("Kapitel 1", "Heading1"),
+        ("Marta kam im Winter.", "Normal"),
+        ("Die Hütte", "Heading2"),
+        ("Der Ofen glühte.", "Normal"),
+        ("Kapitel 2", "Heading1"),
+        ("Martha ging im Frühjahr.", "Normal"),
+    ])
+}
+
+#[test]
+fn chapters_are_the_headings_with_their_levels() {
+    let s = book();
+    let list = crate::chapters(&s.doc);
+    let shown: Vec<(usize, u8, &str)> = list.iter().map(|c| (c.block, c.level, c.title.as_str())).collect();
+    assert_eq!(shown, vec![(1, 1, "Kapitel 1"), (3, 2, "Die Hütte"), (5, 1, "Kapitel 2")]);
+    assert_eq!(crate::chapter_at(&list, 4).map(|c| c.block), Some(3), "a paragraph belongs to the last heading before it");
+    assert_eq!(crate::chapter_at(&list, 0), None, "text before the first heading belongs to no chapter");
+}
+
+#[test]
+fn a_chapter_runs_to_the_next_heading_of_its_level_or_higher() {
+    let s = book();
+    assert_eq!(
+        crate::chapter_text(&s.doc, 1).unwrap(),
+        "Kapitel 1\nMarta kam im Winter.\nDie Hütte\nDer Ofen glühte.\n",
+        "Heading 1 takes its sections"
+    );
+    assert_eq!(crate::chapter_text(&s.doc, 3).unwrap(), "Die Hütte\nDer Ofen glühte.\n", "Heading 2 stops at the next Heading 1");
+    assert_eq!(crate::chapter_text(&s.doc, 5).unwrap(), "Kapitel 2\nMartha ging im Frühjahr.\n", "the last chapter runs to the end");
+    assert_eq!(crate::chapter_text(&s.doc, 2), None, "not a heading");
+    assert_eq!(crate::chapter_text(&s.doc, 99), None, "out of range");
+}
+
+#[test]
+fn empty_headings_and_long_titles() {
+    let long = "Ü".repeat(crate::MAX_TITLE_CHARS + 5);
+    let s = styled(&[("", "Heading1"), (&long, "Heading1"), ("Text", "Normal")]);
+    let list = crate::chapters(&s.doc);
+    assert_eq!(list.len(), 1, "an empty heading starts no chapter");
+    assert_eq!(list[0].title.chars().count(), crate::MAX_TITLE_CHARS + 1);
+    assert!(list[0].title.ends_with('…'));
+    assert!(crate::chapters(&Document::new()).is_empty());
+}
+
+#[test]
+fn a_short_text_is_one_portion_unchanged() {
+    assert_eq!(crate::portions("Ein Satz.\nNoch einer.", 15_000), vec!["Ein Satz.\nNoch einer.".to_string()]);
+    assert!(crate::portions("  \n\n ", 15_000).is_empty(), "blank text: nothing to send");
+    assert!(crate::portions("", 15_000).is_empty());
+}
+
+#[test]
+fn portions_break_between_paragraphs_and_keep_all_text() {
+    let para = format!("{}\n", "Wort ".repeat(120)); // 601 characters
+    let text = para.repeat(5);
+    let parts = crate::portions(&text, 1_000); // the smallest size: one paragraph each
+    assert_eq!(parts.len(), 5);
+    assert!(parts.iter().all(|p| *p == para), "each portion is whole paragraphs");
+    assert_eq!(parts.concat(), text);
+}
+
+#[test]
+fn a_long_paragraph_breaks_after_a_sentence() {
+    let sentence = "Der Ofen glühte die ganze Nacht über. "; // 38 characters
+    let text = sentence.repeat(60); // 2280 characters, one paragraph
+    let parts = crate::portions(&text, 1_000);
+    assert!(parts.len() >= 3);
+    for p in &parts {
+        assert!(p.chars().count() <= 1_000);
+        assert!(p.starts_with("Der Ofen"), "cut between sentences: {p:?}");
+    }
+    assert_eq!(parts.concat(), text);
+}
+
+#[test]
+fn text_without_breaks_is_cut_at_char_boundaries() {
+    let text = "ä".repeat(2_500);
+    let parts = crate::portions(&text, 0); // raised to the smallest size
+    assert_eq!(parts.iter().map(|p| p.chars().count()).collect::<Vec<_>>(), vec![1_000, 1_000, 500]);
+    assert_eq!(parts.concat(), text);
+    let spaced = "ö".repeat(999) + " " + &"ü".repeat(1_500);
+    assert_eq!(crate::portions(&spaced, 1_000).concat(), spaced, "cut after the space, nothing lost");
+}
+
+/// Answers each portion with what `answers` gives for it, and records the portions it got.
+struct Scripted {
+    answers: Vec<Result<Vec<Suggestion>, AssistantError>>,
+    asked: std::cell::RefCell<Vec<String>>,
+}
+
+impl crate::WritingAssistant for Scripted {
+    fn ask(&self, _task: Task, text: &str) -> Result<Vec<Suggestion>, AssistantError> {
+        let n = self.asked.borrow().len();
+        self.asked.borrow_mut().push(text.to_string());
+        self.answers.get(n).cloned().unwrap_or(Ok(vec![]))
+    }
+}
+
+#[test]
+fn portions_are_asked_in_turn_and_repeats_dropped() {
+    let a = Scripted {
+        answers: vec![Ok(vec![comment("Marta", "Name?")]), Ok(vec![comment("Marta", "Name?"), replace("Martha", "Marta")])],
+        asked: Default::default(),
+    };
+    let mut seen = Vec::new();
+    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into(), "zwei".into()], |done, total| seen.push((done, total))).unwrap();
+    assert_eq!(got, vec![comment("Marta", "Name?"), replace("Martha", "Marta")]);
+    assert_eq!(*a.asked.borrow(), vec!["eins".to_string(), "zwei".to_string()]);
+    assert_eq!(seen, vec![(0, 2), (1, 2)]);
+}
+
+#[test]
+fn a_failing_portion_stops_the_run() {
+    let a = Scripted { answers: vec![Ok(vec![comment("Marta", "Name?")]), Err(AssistantError::Http(500))], asked: Default::default() };
+    let got = crate::ask_portions(&a, Task::Lektorat, &["eins".into(), "zwei".into(), "drei".into()], |_, _| {});
+    assert_eq!(got, Err(AssistantError::Http(500)));
+    assert_eq!(a.asked.borrow().len(), 2, "the third portion isn't sent");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn settings_saved_before_portions_get_the_default_size() {
+    let c: crate::flowise::FlowiseConfig = serde_json::from_str(r#"{"base_url":"http://localhost:3000","lektorat_flow":"abc"}"#).unwrap();
+    assert_eq!(c.portion_chars, crate::DEFAULT_PORTION_CHARS);
+}

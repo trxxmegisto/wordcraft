@@ -4,36 +4,54 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use wordcraft_assistant::flowise::{FlowiseAssistant, FlowiseConfig};
-use wordcraft_assistant::{AssistantError, Suggestion, Task, WritingAssistant};
+use wordcraft_assistant::{AssistantError, Suggestion, Task, ask_portions};
 
 type Answer = Result<Vec<Suggestion>, AssistantError>;
 
+enum Message {
+    /// Portion `.0` of `.1` (counting from 0) is being asked about.
+    Progress(usize, usize),
+    Done(Answer),
+}
+
 /// A request on its way.
-pub(crate) struct Pending(Receiver<Answer>);
+pub(crate) struct Pending {
+    rx: Receiver<Message>,
+    /// The portion being asked about and how many there are (counting from 0).
+    pub(crate) progress: (usize, usize),
+}
 
 impl Pending {
-    /// Send `text` for `task` on a new thread; `ctx` is woken when the answer is in.
-    pub(crate) fn start(config: FlowiseConfig, task: Task, text: String, ctx: egui::Context) -> Self {
+    /// Send `portions` for `task` one after another on a new thread; `ctx` is woken at each step.
+    pub(crate) fn start(config: FlowiseConfig, task: Task, portions: Vec<String>, ctx: egui::Context) -> Self {
+        let total = portions.len();
         let (tx, rx) = mpsc::channel();
         let spawned = std::thread::Builder::new().name("assistant".into()).spawn(move || {
-            let answer = FlowiseAssistant::new(config).ask(task, &text);
-            let _ = tx.send(answer);
+            let assistant = FlowiseAssistant::new(config);
+            let answer = ask_portions(&assistant, task, &portions, |done, total| {
+                let _ = tx.send(Message::Progress(done, total));
+                ctx.request_repaint();
+            });
+            let _ = tx.send(Message::Done(answer));
             ctx.request_repaint();
         });
         if let Err(e) = spawned {
             let (tx, rx) = mpsc::channel();
-            let _ = tx.send(Err(AssistantError::Unreachable(format!("Die Anfrage konnte nicht gestartet werden ({e})."))));
-            return Self(rx);
+            let _ = tx.send(Message::Done(Err(AssistantError::Unreachable(format!("Die Anfrage konnte nicht gestartet werden ({e}).")))));
+            return Self { rx, progress: (0, total) };
         }
-        Self(rx)
+        Self { rx, progress: (0, total) }
     }
 
-    /// The answer, once it is in.
+    /// The answer, once it is in; meanwhile keeps [`Pending::progress`] current.
     pub(crate) fn poll(&mut self) -> Option<Answer> {
-        match self.0.try_recv() {
-            Ok(answer) => Some(answer),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err(AssistantError::Unreachable("Die Anfrage endete ohne Antwort.".into()))),
+        loop {
+            match self.rx.try_recv() {
+                Ok(Message::Progress(done, total)) => self.progress = (done, total),
+                Ok(Message::Done(answer)) => return Some(answer),
+                Err(TryRecvError::Empty) => return None,
+                Err(TryRecvError::Disconnected) => return Some(Err(AssistantError::Unreachable("Die Anfrage endete ohne Antwort.".into()))),
+            }
         }
     }
 }
@@ -58,7 +76,7 @@ pub(crate) fn with_env(mut c: FlowiseConfig) -> FlowiseConfig {
     c
 }
 
-/// Settings files bigger than this are ignored (they hold four short strings).
+/// Settings files bigger than this are ignored (they hold a few short strings).
 const MAX_SETTINGS_BYTES: u64 = 64 * 1024;
 
 /// The settings saved in `path`; the defaults when there are none or they can't be read.

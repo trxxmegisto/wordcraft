@@ -25,6 +25,9 @@ pub struct FlowiseConfig {
     pub konsistenz_flow: String,
     /// Seconds before a call gives up.
     pub timeout_secs: u64,
+    /// Longest text sent in one request, in characters: longer texts go in portions
+    /// ([`crate::portions`]). Set it to what the chatflow's model can take.
+    pub portion_chars: usize,
     /// Flowise API key (sent as a bearer token). Never saved with the settings: the caller loads
     /// it from the operating system's credential store.
     #[serde(skip)]
@@ -39,6 +42,7 @@ impl Default for FlowiseConfig {
             recherche_flow: String::new(),
             konsistenz_flow: String::new(),
             timeout_secs: DEFAULT_TIMEOUT_SECS,
+            portion_chars: crate::DEFAULT_PORTION_CHARS,
             api_key: None,
         }
     }
@@ -87,7 +91,9 @@ impl FlowiseAssistant {
     /// A client for `config`.
     pub fn new(config: FlowiseConfig) -> Self {
         let timeout = Duration::from_secs(config.timeout_secs.clamp(5, 3600));
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).build().into();
+        // No connection reuse: a long text goes in several requests, and a server that closed
+        // the previous connection (as Node does after a few idle seconds) would fail the next one.
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(timeout)).max_idle_connections(0).build().into();
         Self { config, agent }
     }
 
@@ -114,7 +120,13 @@ impl WritingAssistant for FlowiseAssistant {
 fn map_error(e: ureq::Error) -> AssistantError {
     match e {
         ureq::Error::StatusCode(code) => AssistantError::Http(code),
-        other => AssistantError::Unreachable(other.to_string()),
+        other => {
+            let mut msg = other.to_string();
+            if !msg.ends_with(['.', '!', '?']) {
+                msg.push('.');
+            }
+            AssistantError::Unreachable(msg)
+        }
     }
 }
 

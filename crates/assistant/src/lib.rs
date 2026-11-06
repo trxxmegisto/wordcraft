@@ -7,16 +7,20 @@
 //! each one with the normal Review tools.
 //!
 //! This crate is a self-contained extension (KWordCraft fork): it only uses the engine's public
-//! command interface, so upstream changes to WordCraft rarely touch it.
+//! command interface and document model, so upstream changes to WordCraft rarely touch it.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod apply;
+mod chapters;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod flowise;
+mod portions;
 mod prompt;
 mod suggestion;
 
 pub use apply::{ApplyReport, DEFAULT_AUTHOR, apply, apply_as};
+pub use chapters::{Chapter, MAX_TITLE_CHARS, chapter_at, chapter_text, chapters};
+pub use portions::{DEFAULT_PORTION_CHARS, MAX_PORTION_CHARS, MIN_PORTION_CHARS, ask_portions, portions};
 pub use prompt::{Task, VERDICTS, question};
 pub use suggestion::{Kind, MAX_FIELD_CHARS, MAX_SUGGESTIONS, Suggestion, parse_suggestions};
 
