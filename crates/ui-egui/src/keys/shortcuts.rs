@@ -254,6 +254,11 @@ pub fn global_shortcuts(app: &mut WordApp, ctx: &egui::Context) {
     {
         return;
     }
+    // Embedded, the shortcuts are WordCraft's only while its area was the last one clicked
+    // ([`crate::embed`]): Ctrl+Z in the host's tree undoes nothing in the document.
+    if !app.embedded_active() {
+        return;
+    }
     let events = ctx.input(|i| i.events.clone());
     let window = app.windows.shown();
     for e in events {

@@ -128,6 +128,10 @@ impl WordApp {
             return;
         }
         let Some(pos) = ctx.input(|i| if i.pointer.any_click() { i.pointer.interact_pos() } else { None }) else { return };
+        // Embedded, a click in the host's own panes is the host's ([`crate::embed`]).
+        if !self.owns_point(pos) {
+            return;
+        }
         // The ribbon dropped over the page in Focus (#1678) is chrome, though it lies over the page.
         let on_focus_ribbon = self.focus_ribbon && ctx.layer_id_at(pos).is_some_and(|l| l.id == egui::Id::unique("focus_ribbon"));
         // The page handles its own clicks (comment balloons there take the keyboard themselves).

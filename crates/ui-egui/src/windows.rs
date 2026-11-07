@@ -121,8 +121,8 @@ impl Windows {
         self.native
     }
 
-    /// One window for every document, as in the web app.
-    #[cfg(test)]
+    /// One window for every document, as in the web app (tests, and an app embedded in a host's
+    /// window, [`crate::embed`]).
     pub(crate) fn single(&mut self) {
         self.native = false;
     }

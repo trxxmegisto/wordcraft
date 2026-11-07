@@ -52,7 +52,10 @@ impl WordApp {
             backstage::show(self, ui);
         } else if !self.has_document() {
             // No document open (#1129): the ribbon greyed out but for Help, and no page.
-            chrome::title_bar(self, ui);
+            // Embedded, the window and its title bar are the host's.
+            if !self.embedded() {
+                chrome::title_bar(self, ui);
+            }
             ribbon::show(self, ui);
             chrome::status_bar(self, ui);
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |_| {});
@@ -63,7 +66,9 @@ impl WordApp {
             if screen != chrome::Screen::Normal {
                 chrome::screen_bar(self, ui, screen);
             } else {
-                chrome::title_bar(self, ui);
+                if !self.embedded() {
+                    chrome::title_bar(self, ui);
+                }
                 if moved(self) {
                     return;
                 }
@@ -123,12 +128,16 @@ impl WordApp {
         // With native windows the viewport driver gives the window its title.
         let title = self.window_title();
         if title != self.sent_title {
-            if !self.windows.driven() {
+            // Embedded, the host titles its own window.
+            if !self.windows.driven() && !self.embedded() {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
             }
             self.sent_title = title;
         }
-        self.sync_full_screen(ctx);
+        // Embedded, the host's window isn't WordCraft's to put in full screen.
+        if !self.embedded() {
+            self.sync_full_screen(ctx);
+        }
         self.frame_ms = now_ms() - t0;
         // Typing and formatting land here, after `logic` has reported.
         self.report_dirty();

@@ -167,6 +167,7 @@ impl WordApp {
             font_generation: _,
             integrated_titlebar: _,
             mac_titlebar: _,
+            embed: _,
             control_rx: _,
             updates_rt: _,
             packs_rt: _,

@@ -77,6 +77,7 @@ pub mod table_ruler;
 pub mod theme;
 pub mod updates_ui;
 pub mod widgets;
+pub mod embed;
 pub mod window_close;
 pub mod window_geometry;
 mod window_ui;
@@ -643,6 +644,10 @@ pub struct WordApp {
     pub integrated_titlebar: bool,
     /// macOS: the title bar's height and where its content starts, around the traffic lights.
     pub mac_titlebar: chrome::MacTitleBar,
+    /// Drawn inside another app's window (a tab of a host's docking layout), not in a window of
+    /// its own: no title bar, no window commands, keys only while the host's area is in use.
+    /// `None` for the WordCraft app itself ([`embed`]).
+    pub(crate) embed: Option<embed::Embed>,
     /// Focus (#1678): the ribbon is dropped down from the Focus bar, over the page.
     pub(crate) focus_ribbon: bool,
     pub(crate) updates_rt: updates_ui::Runtime,

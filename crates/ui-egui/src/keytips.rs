@@ -713,6 +713,8 @@ pub fn suppressed(app: &WordApp, ctx: &egui::Context) -> bool {
         || app.dialog.is_some()
         || app.modal_open()
         || (ctx.egui_wants_keyboard_input() && !app.canvas.focused)
+        // Embedded, Alt in the host's own panes is the host's ([`crate::embed`]).
+        || !app.embedded_active()
 }
 
 /// Native backends report Alt through both key and modifier events, in either order. Track
