@@ -1,5 +1,5 @@
 use serde_json::json;
-use wordcraft_assistant::{AssistantError, Kind, Suggestion, Task};
+use wordcraft_assistant::{AssistantError, Kind, Reply, Suggestion, Task};
 use wordcraft_engine::Session;
 use wordcraft_engine::doc::Document;
 use wordcraft_ui_egui::WordApp;
@@ -275,11 +275,14 @@ fn the_chapter_with_the_cursor_is_picked_first() {
 #[test]
 fn several_portions_say_so_in_the_message() {
     let mut pane = AssistantPane::new();
-    pane.receive_parts(Ok(vec![comment("Marta", "Name?")]), 2, 3);
+    let reply = |suggestions: Vec<Suggestion>, facts: &[&str]| Reply { suggestions, facts: facts.iter().map(|f| f.to_string()).collect() };
+    pane.receive_parts(Ok(reply(vec![comment("Marta", "Name?")], &[])), 2, 3);
     assert_eq!(pane.message.as_deref(), Some("1 Vorschlag. (3 Teile geprüft.)"));
     pane.receive_parts(Err(AssistantError::Http(500)), 1, 3);
     assert!(pane.message_is_error);
     assert_eq!(pane.message.as_deref(), Some("Bei Teil 2 von 3: Flowise hat mit HTTP-Status 500 geantwortet."));
-    pane.receive_parts(Ok(vec![]), 0, 1);
+    pane.receive_parts(Ok(reply(vec![], &[])), 0, 1);
     assert_eq!(pane.message.as_deref(), Some("Keine Anmerkungen."), "one portion: no count");
+    pane.receive_parts(Ok(reply(vec![comment("Marta", "Widerspruch")], &["Anna hat blaue Augen.", "Die Firma sitzt in Hamburg."])), 1, 2);
+    assert_eq!(pane.message.as_deref(), Some("1 Vorschlag. (2 Teile geprüft, 2 Fakten weitergegeben.)"));
 }

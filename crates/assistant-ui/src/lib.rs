@@ -8,7 +8,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 use egui::{RichText, Ui};
-use wordcraft_assistant::{AssistantError, Chapter, Kind, Suggestion, Task, apply_as, chapter_at, chapter_text, chapters};
+use wordcraft_assistant::{AssistantError, Chapter, Kind, Reply, Suggestion, Task, apply_as, chapter_at, chapter_text, chapters};
 use wordcraft_ui_egui::WordApp;
 use wordcraft_ui_egui::panes::PaneExtension;
 
@@ -200,15 +200,21 @@ impl AssistantPane {
     }
 
     /// [`AssistantPane::receive`] for a text sent in `total` portions, the last one asked about
-    /// being `at` (counting from 0): says how many were checked, or at which one it failed.
-    pub fn receive_parts(&mut self, answer: Result<Vec<Suggestion>, AssistantError>, at: usize, total: usize) {
-        self.receive(answer);
+    /// being `at` (counting from 0): says how many were checked and how many facts were carried
+    /// between them, or at which one it failed.
+    pub fn receive_parts(&mut self, answer: Result<Reply, AssistantError>, at: usize, total: usize) {
+        let facts = answer.as_ref().map_or(0, |r| r.facts.len());
+        self.receive(answer.map(|r| r.suggestions));
         if total > 1 {
             let msg = self.message.take().unwrap_or_default();
             self.message = Some(if self.message_is_error {
                 format!("Bei Teil {} von {total}: {msg}", at + 1)
             } else {
-                format!("{msg} ({total} Teile geprüft.)")
+                match facts {
+                    0 => format!("{msg} ({total} Teile geprüft.)"),
+                    1 => format!("{msg} ({total} Teile geprüft, 1 Fakt weitergegeben.)"),
+                    n => format!("{msg} ({total} Teile geprüft, {n} Fakten weitergegeben.)"),
+                }
             });
         }
     }

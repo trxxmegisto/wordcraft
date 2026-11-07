@@ -21,8 +21,11 @@ mod suggestion;
 pub use apply::{ApplyReport, DEFAULT_AUTHOR, apply, apply_as};
 pub use chapters::{Chapter, MAX_TITLE_CHARS, chapter_at, chapter_text, chapters};
 pub use portions::{DEFAULT_PORTION_CHARS, MAX_PORTION_CHARS, MIN_PORTION_CHARS, ask_portions, portions};
-pub use prompt::{Task, VERDICTS, question};
-pub use suggestion::{Kind, MAX_FIELD_CHARS, MAX_SUGGESTIONS, Suggestion, parse_suggestions};
+pub use portions::{MAX_FACTS, MAX_FACTS_CHARS};
+pub use prompt::{Task, VERDICTS, question, question_with_facts};
+pub use suggestion::{
+    Kind, MAX_FACT_CHARS, MAX_FACTS_PER_ANSWER, MAX_FIELD_CHARS, MAX_SUGGESTIONS, Reply, Suggestion, parse_reply, parse_suggestions,
+};
 
 /// Errors from the assistant. Their messages are German: they are shown to the writer as they are.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -45,6 +48,14 @@ pub enum AssistantError {
 pub trait WritingAssistant {
     /// Analyse `text` for `task`. Blocking: call it off the UI thread.
     fn ask(&self, task: Task, text: &str) -> Result<Vec<Suggestion>, AssistantError>;
+
+    /// Analyse one portion of a long text against the facts `known` from earlier portions and,
+    /// with `collect`, also report this portion's facts. Blocking. A backend that can't carry
+    /// facts answers as [`WritingAssistant::ask`] does, with no facts.
+    fn ask_with_facts(&self, task: Task, text: &str, known: &[String], collect: bool) -> Result<Reply, AssistantError> {
+        let _ = (known, collect);
+        Ok(Reply { suggestions: self.ask(task, text)?, facts: Vec::new() })
+    }
 }
 
 #[cfg(test)]

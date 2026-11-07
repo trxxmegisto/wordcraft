@@ -396,8 +396,9 @@ fn portions_are_asked_in_turn_and_repeats_dropped() {
         asked: Default::default(),
     };
     let mut seen = Vec::new();
-    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into(), "zwei".into()], |done, total| seen.push((done, total))).unwrap();
-    assert_eq!(got, vec![comment("Marta", "Name?"), replace("Martha", "Marta")]);
+    let got = crate::ask_portions(&a, Task::Lektorat, &["eins".into(), "zwei".into()], |done, total| seen.push((done, total))).unwrap();
+    assert_eq!(got.suggestions, vec![comment("Marta", "Name?"), replace("Martha", "Marta")]);
+    assert!(got.facts.is_empty());
     assert_eq!(*a.asked.borrow(), vec!["eins".to_string(), "zwei".to_string()]);
     assert_eq!(seen, vec![(0, 2), (1, 2)]);
 }
@@ -408,6 +409,114 @@ fn a_failing_portion_stops_the_run() {
     let got = crate::ask_portions(&a, Task::Lektorat, &["eins".into(), "zwei".into(), "drei".into()], |_, _| {});
     assert_eq!(got, Err(AssistantError::Http(500)));
     assert_eq!(a.asked.borrow().len(), 2, "the third portion isn't sent");
+}
+
+/// Answers with `replies` in turn and records what each request carried: known facts, collect.
+struct FactScripted {
+    replies: Vec<crate::Reply>,
+    asked: std::cell::RefCell<Vec<(Vec<String>, bool)>>,
+}
+
+impl crate::WritingAssistant for FactScripted {
+    fn ask(&self, _task: Task, _text: &str) -> Result<Vec<Suggestion>, AssistantError> {
+        Err(AssistantError::Format("plain ask isn't used for a consistency check in portions".into()))
+    }
+    fn ask_with_facts(&self, _task: Task, _text: &str, known: &[String], collect: bool) -> Result<crate::Reply, AssistantError> {
+        let n = self.asked.borrow().len();
+        self.asked.borrow_mut().push((known.to_vec(), collect));
+        Ok(self.replies.get(n).cloned().unwrap_or_default())
+    }
+}
+
+fn facts(list: &[&str]) -> Vec<String> {
+    list.iter().map(|f| f.to_string()).collect()
+}
+
+#[test]
+fn a_consistency_check_carries_facts_from_portion_to_portion() {
+    let a = FactScripted {
+        replies: vec![
+            crate::Reply { suggestions: vec![], facts: facts(&["Anna hat blaue Augen."]) },
+            crate::Reply { suggestions: vec![], facts: facts(&["anna hat  blaue Augen", "Die Firma sitzt in Hamburg."]) },
+            crate::Reply { suggestions: vec![comment("braune Augen", "Widerspruch: Vorher hatte Anna blaue Augen.")], facts: facts(&["ignored"]) },
+        ],
+        asked: Default::default(),
+    };
+    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into(), "zwei".into(), "drei".into()], |_, _| {}).unwrap();
+    let asked = a.asked.borrow();
+    assert_eq!(asked.len(), 3);
+    assert_eq!(asked[0], (vec![], true), "the first portion only collects");
+    assert_eq!(asked[1], (facts(&["Anna hat blaue Augen."]), true));
+    assert_eq!(
+        asked[2],
+        (facts(&["Anna hat blaue Augen.", "Die Firma sitzt in Hamburg."]), false),
+        "a repeat is dropped; the last portion doesn't collect"
+    );
+    assert_eq!(got.suggestions, vec![comment("braune Augen", "Widerspruch: Vorher hatte Anna blaue Augen.")]);
+    assert_eq!(got.facts, facts(&["Anna hat blaue Augen.", "Die Firma sitzt in Hamburg."]));
+}
+
+#[test]
+fn carried_facts_are_capped() {
+    let many: Vec<String> = (0..crate::MAX_FACTS + 50).map(|i| format!("Fakt {i}.")).collect();
+    let a = FactScripted { replies: vec![crate::Reply { suggestions: vec![], facts: many }], asked: Default::default() };
+    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into(), "zwei".into()], |_, _| {}).unwrap();
+    assert_eq!(got.facts.len(), crate::MAX_FACTS);
+    let long: Vec<String> = (0..200).map(|i| format!("{i} {}", "x".repeat(250))).collect();
+    let a = FactScripted { replies: vec![crate::Reply { suggestions: vec![], facts: long }], asked: Default::default() };
+    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into(), "zwei".into()], |_, _| {}).unwrap();
+    assert!(got.facts.iter().map(|f| f.chars().count()).sum::<usize>() <= crate::MAX_FACTS_CHARS);
+}
+
+#[test]
+fn a_single_portion_or_another_task_carries_no_facts() {
+    let a = Scripted { answers: vec![Ok(vec![comment("Marta", "Name?")])], asked: Default::default() };
+    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into()], |_, _| {}).unwrap();
+    assert_eq!(got.suggestions, vec![comment("Marta", "Name?")], "one portion: a plain question");
+    let a = Scripted { answers: vec![], asked: Default::default() };
+    let got = crate::ask_portions(&a, Task::Recherche, &["eins".into(), "zwei".into()], |_, _| {}).unwrap();
+    assert!(got.facts.is_empty());
+    assert_eq!(a.asked.borrow().len(), 2);
+}
+
+#[test]
+fn a_backend_without_facts_still_checks_every_portion() {
+    // `Scripted` only has `ask`: the default `ask_with_facts` answers with no facts.
+    let a = Scripted { answers: vec![Ok(vec![]), Ok(vec![comment("Marta", "Name?")])], asked: Default::default() };
+    let got = crate::ask_portions(&a, Task::Konsistenz, &["eins".into(), "zwei".into()], |_, _| {}).unwrap();
+    assert_eq!(got.suggestions, vec![comment("Marta", "Name?")]);
+    assert!(got.facts.is_empty());
+}
+
+#[test]
+fn the_question_lists_known_facts_and_asks_for_new_ones() {
+    let q = crate::question_with_facts(Task::Konsistenz, "Anna hatte braune Augen.", &facts(&["Anna hat blaue Augen."]), true);
+    assert!(q.contains("<<<FAKTEN\n- Anna hat blaue Augen.\nFAKTEN>>>"));
+    assert!(q.contains("\"facts\""));
+    let fakten = q.find("<<<FAKTEN").unwrap();
+    assert!(fakten < q.find("<<<TEXT").unwrap(), "facts come before the text");
+    let last = crate::question_with_facts(Task::Konsistenz, "x", &facts(&["Anna hat blaue Augen."]), false);
+    assert!(!last.contains("\"facts\""), "the last portion isn't asked for facts");
+    assert!(last.contains("JSON-Array"));
+    assert_eq!(crate::question_with_facts(Task::Lektorat, "x", &[], false), question(Task::Lektorat, "x"), "no facts: the plain question");
+}
+
+#[test]
+fn a_reply_with_facts_is_read() {
+    let r = crate::parse_reply(
+        r#"```json
+{"suggestions": [{"kind": "comment", "original": "braune Augen", "reason": "Widerspruch"}],
+ "facts": ["Anna hat blaue Augen.", "", 7, "zwei\nZeilen"]}
+```"#,
+    )
+    .unwrap();
+    assert_eq!(r.suggestions, vec![comment("braune Augen", "Widerspruch")]);
+    assert_eq!(r.facts, facts(&["Anna hat blaue Augen.", "zwei Zeilen"]), "empty and non-string facts are skipped, line breaks flattened");
+    assert_eq!(crate::parse_reply(r#"{"facts": ["Anna hat blaue Augen."]}"#).unwrap().suggestions, vec![], "facts alone: no suggestions");
+    assert_eq!(crate::parse_reply("[]").unwrap(), crate::Reply::default(), "a bare list has no facts");
+    let long = format!(r#"{{"suggestions": [], "facts": ["{}"]}}"#, "x".repeat(crate::MAX_FACT_CHARS + 1));
+    assert!(crate::parse_reply(&long).unwrap().facts.is_empty(), "an overlong fact is dropped");
+    assert!(crate::parse_reply(r#"{"other": 1}"#).is_err());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

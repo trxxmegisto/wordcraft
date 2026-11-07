@@ -99,12 +99,44 @@ impl Task {
 /// The verdicts a research note opens with.
 pub const VERDICTS: [&str; 3] = ["Falsch:", "Zweifelhaft:", "Unklar:"];
 
-const FORMAT: &str = "Antworte ausschließlich mit einem JSON-Array, ohne weiteren Text. Jedes Element ist ein Objekt:\n\
-{\"kind\": \"replace\" oder \"comment\", \"original\": die betroffene Textstelle, zeichengenau und wörtlich aus dem Text kopiert, so kurz wie möglich, aber eindeutig, \"replacement\": der neue Text (nur bei replace), \"reason\": eine kurze Begründung auf Deutsch}.\n\
-\"original\" muss genau so im Text stehen: Kopiere die Stelle Zeichen für Zeichen, ohne Zahlen, Wörter oder Satzzeichen zu ändern, auch wenn sie falsch sind, und ohne Zeilenumbrüche; die Korrektur gehört in \"replacement\" oder \"reason\".\n\
-Wenn es nichts anzumerken gibt, antworte mit [].";
+const FORMAT: &str = "Antworte ausschließlich mit einem JSON-Array, ohne weiteren Text. Jedes Element ist ein Objekt:\n";
+
+const FORMAT_WITH_FACTS: &str = "Antworte ausschließlich mit einem JSON-Objekt, ohne weiteren Text: {\"suggestions\": [...], \"facts\": [...]}.\n\
+\"facts\" ist eine Liste kurzer Sätze mit den Fakten aus diesem Text, die für spätere Teile wichtig sind: Namen und ihre Schreibweise, Alter, Aussehen, Beziehungen, Orte, Zeitangaben und Ereignisse, zum Beispiel \"Anna Berger hat blaue Augen.\" oder \"Die Firma sitzt in Hamburg.\". Höchstens 30 Sätze; wiederhole keine bereits bekannten Fakten.\n\
+Jedes Element von \"suggestions\" ist ein Objekt:\n";
+
+const ITEM: &str = "{\"kind\": \"replace\" oder \"comment\", \"original\": die betroffene Textstelle, zeichengenau und wörtlich aus dem Text kopiert, so kurz wie möglich, aber eindeutig, \"replacement\": der neue Text (nur bei replace), \"reason\": eine kurze Begründung auf Deutsch}.\n\
+\"original\" muss genau so im Text stehen: Kopiere die Stelle Zeichen für Zeichen, ohne Zahlen, Wörter oder Satzzeichen zu ändern, auch wenn sie falsch sind, und ohne Zeilenumbrüche; die Korrektur gehört in \"replacement\" oder \"reason\".\n";
+
+const NOTHING: &str = "Wenn es nichts anzumerken gibt, antworte mit [].";
+const NOTHING_WITH_FACTS: &str = "Wenn es nichts anzumerken gibt, ist \"suggestions\" leer: [].";
 
 /// The full question for `task` about `text`.
 pub fn question(task: Task, text: &str) -> String {
-    format!("{}\n\n{FORMAT}\n\n<<<TEXT\n{text}\nTEXT>>>", task.instructions())
+    question_with_facts(task, text, &[], false)
+}
+
+/// The question for one portion of a long text: `known` are the facts the earlier portions
+/// established (the text is checked against them), and with `collect` the answer is asked to
+/// list this portion's facts too (see [`crate::Reply`]).
+pub fn question_with_facts(task: Task, text: &str, known: &[String], collect: bool) -> String {
+    let (format, nothing) = if collect { (FORMAT_WITH_FACTS, NOTHING_WITH_FACTS) } else { (FORMAT, NOTHING) };
+    let mut q = format!("{}\n\n{format}{ITEM}{nothing}\n\n", task.instructions());
+    if !known.is_empty() {
+        q.push_str("Bereits bekannte Fakten aus den vorherigen Teilen desselben Textes:\n<<<FAKTEN\n");
+        for fact in known {
+            q.push_str("- ");
+            q.push_str(fact);
+            q.push('\n');
+        }
+        q.push_str(
+            "FAKTEN>>>\nWiderspricht der Text unten einem dieser Fakten, melde das als \"comment\" an der Stelle im Text und \
+             nenne den Fakt in der Begründung, zum Beispiel \"Widerspruch: Vorher hatte Anna blaue Augen.\". \
+             \"original\" stammt immer aus dem Text unten, nie aus den Fakten.\n\n",
+        );
+    }
+    q.push_str("<<<TEXT\n");
+    q.push_str(text);
+    q.push_str("\nTEXT>>>");
+    q
 }

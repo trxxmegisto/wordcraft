@@ -4,9 +4,9 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use wordcraft_assistant::flowise::{FlowiseAssistant, FlowiseConfig};
-use wordcraft_assistant::{AssistantError, Suggestion, Task, ask_portions};
+use wordcraft_assistant::{AssistantError, Reply, Task, ask_portions};
 
-type Answer = Result<Vec<Suggestion>, AssistantError>;
+type Answer = Result<Reply, AssistantError>;
 
 enum Message {
     /// Portion `.0` of `.1` (counting from 0) is being asked about.

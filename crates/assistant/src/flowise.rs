@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{AssistantError, Suggestion, Task, WritingAssistant, parse_suggestions, question};
+use crate::{AssistantError, Reply, Suggestion, Task, WritingAssistant, parse_reply, parse_suggestions, question, question_with_facts};
 
 /// Longest a call may take by default (long chapters through a large model take a while).
 pub const DEFAULT_TIMEOUT_SECS: u64 = 180;
@@ -105,15 +105,26 @@ impl FlowiseAssistant {
 
 impl WritingAssistant for FlowiseAssistant {
     fn ask(&self, task: Task, text: &str) -> Result<Vec<Suggestion>, AssistantError> {
+        parse_suggestions(&self.send(task, &question(task, text))?)
+    }
+
+    fn ask_with_facts(&self, task: Task, text: &str, known: &[String], collect: bool) -> Result<Reply, AssistantError> {
+        parse_reply(&self.send(task, &question_with_facts(task, text, known, collect))?)
+    }
+}
+
+impl FlowiseAssistant {
+    /// Post `question` to `task`'s chatflow and return the answer's text.
+    fn send(&self, task: Task, question: &str) -> Result<String, AssistantError> {
         let url = self.config.endpoint(task)?;
-        let body = json!({ "question": question(task, text) }).to_string();
+        let body = json!({ "question": question }).to_string();
         let mut request = self.agent.post(&url).header("Content-Type", "application/json");
         if let Some(key) = self.config.api_key.as_deref().filter(|k| !k.is_empty()) {
             request = request.header("Authorization", format!("Bearer {key}"));
         }
         let mut response = request.send(body.as_str()).map_err(map_error)?;
         let raw = response.body_mut().read_to_string().map_err(map_error)?;
-        parse_suggestions(&answer_text(&raw)?)
+        answer_text(&raw)
     }
 }
 
